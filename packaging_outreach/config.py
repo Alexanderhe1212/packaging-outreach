@@ -12,6 +12,8 @@ def load(path):
     if api:
         shared={'base_url':api['base_url'],'api_key_env':api.get('api_key_env','OUTREACH_API_KEY')}
         defaults={'research':dict(shared,kind='responses',model=api['text_model'],web_search=True),'text':dict(shared,kind='chat',model=api['text_model']),'image':dict(shared,kind='image_edits',model=api['image_model'])}
+        if api.get('research_model'):defaults['research']['model']=api['research_model']
+        if api.get('vision_model'):defaults['vision']=dict(shared,kind='chat',model=api['vision_model'],vision=True)
         defaults.update(c.get('providers',{}));c['providers']=defaults
     brands=c.get('brands',[])
     if not brands or len({b['id'] for b in brands})!=len(brands):raise ValueError('Unique brand profiles required')
@@ -27,6 +29,10 @@ def load(path):
         u=urlsplit(p.get('base_url',p.get('url','')))
         if u.scheme!='https' and not(u.scheme=='http' and u.hostname in ('localhost','127.0.0.1','::1')):raise ValueError('API requires HTTPS or a loopback HTTP endpoint')
         if u.username or u.password:raise ValueError('Credentials do not belong in URLs')
+        if p.get('json_mode','json_object') not in ('json_object','prompt'):raise ValueError('json_mode must be json_object or prompt')
+        if p.get('token_limit_parameter','max_completion_tokens') not in ('max_tokens','max_completion_tokens'):raise ValueError('Unsupported token limit parameter')
+        if 'vision' in p and type(p['vision']) is not bool:raise ValueError('vision capability must be true or false')
+    if c.get('workflow',{}).get('mode','balanced') not in ('balanced','economy'):raise ValueError('workflow.mode must be balanced or economy')
     for key in ('catalog','material_manifest'):
         if c.get(key):c[key]=str((path.parent/Path(c[key])).resolve())
     for profile in c.get('product_profiles',{}).values():

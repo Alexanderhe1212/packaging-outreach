@@ -2,7 +2,7 @@
 import base64,hashlib,json,time,uuid,threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
-from . import sources,materials,prompts,mail,profiles,performance
+from . import sources,materials,prompts,mail,profiles,performance,sales
 from .cache import PageCache
 from .providers import HTTPProvider,RetryLater,UncertainCall
 from .images import validate_png
@@ -58,6 +58,7 @@ class Engine:
         if image not in product.get('images',[]) and image not in product['text']:raise ValueError('Product image URL not bound to source page')
         if type(count) is not int or not 1<=count<=50 or not quote or sources.normalize(quote) not in sources.normalize(product['text']):raise ValueError('Product quantity needs source evidence')
         p=result['payload'];p.update(company=result['company'],recipient=result['recipient'],product_reference={'url':image,'source_url':p['product_evidence_url'],'unit_count':count,'count_evidence_quote':quote},source_mode=self.config.get('source_mode','direct_https'),seller_profile=profile)
+        p['workflow_mode']=self.config.get('workflow',{}).get('mode','balanced')
         return p
     def process(self,jid):
         if not self.store.claim(jid):return
@@ -82,20 +83,29 @@ class Engine:
                 self.store.advance(jid,'done',{'candidate_found':bool(candidate),'new_job_id':added},'done');return
             if stage=='concept':
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference']}
-                profile=p.get('seller_profile') or profiles.resolve(self.config,brand);public['seller_profile']=profile;p['seller_profile']=profile
+                profile=p.get('seller_profile') or profiles.resolve(self.config,brand);public['seller_profile']={k:profile[k] for k in ('id','name','offer','design_rules','validation_note')};p['seller_profile']=profile
+                economy=p.get('workflow_mode')=='economy'
+                brief=sales.brief(p,profile,brand) if economy else public
                 # Product download has no dependency on the plan call.
                 with ThreadPoolExecutor(max_workers=2) as prep:
                     reference=prep.submit(self.reference,p)
-                    plan=profiles.normalize_plan(self.api(job,'plan',prompts.PLAN_PROFILE,dict(public,catalog=materials.context(self.store,profile))),profile)
+                    answer=self.api(job,'plan',prompts.PLAN_EMAIL if economy else prompts.PLAN_PROFILE,dict(brief,catalog=materials.context(self.store,profile)))
+                    plan=profiles.normalize_plan(answer,profile)
+                    if economy:p['prepared_email']=sales.compose(answer['email'],brief)
                     refs=[reference.result()]+materials.selected_images(plan,profile.get('material_manifest',self.config.get('material_manifest')))
                 image=self.api(job,'image',prompts.IMAGE_PROFILE,dict(public,plan=plan),refs)
                 raw=base64.b64decode(image['png_base64'],validate=True);validate_png(raw)
                 p.update(plan=plan,concept_png=image['png_base64'],concept_sha256=hashlib.sha256(raw).hexdigest())
                 self.store.advance(jid,'draft',p);return
             if stage=='draft':
+                if p.get('prepared_email'):
+                    identity=self.api(job,'identity',prompts.IDENTITY,{'facts':p['facts'][:6],'unit_count':p['product_reference']['unit_count']},[self.reference(p),(base64.b64decode(p['concept_png']),'image/png')])
+                    if not all(identity.get(k) is True for k in ['correct_product','correct_count','usable_image']):raise ValueError('Factual product identity unresolved')
+                    p['draft']=dict(p['prepared_email'],identity=identity);self.store.advance(jid,'send',p);return
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference','plan']}
                 public['sender']={'name':brand['name'],'signature':brand['signature']}
-                public['seller_profile']=p.get('seller_profile') or profiles.resolve(self.config,brand)
+                profile=p.get('seller_profile') or profiles.resolve(self.config,brand)
+                public['seller_profile']={k:profile[k] for k in ('id','name','offer','design_rules','validation_note')}
                 draft=self.api(job,'draft',prompts.DRAFT_PROFILE,public,[self.reference(p),(base64.b64decode(p['concept_png']),'image/png')])
                 if not draft.get('subject') or len(draft['subject'])>150 or not draft.get('body') or len(draft['body'])>2400:raise ValueError('Concise subject and body required')
                 if not all(draft.get('identity',{}).get(k) is True for k in ['correct_product','correct_count','usable_image']):raise ValueError('Factual product identity unresolved')

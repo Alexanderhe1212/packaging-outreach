@@ -12,13 +12,14 @@ def distribution(values):
 def report(store, target=300, now=None):
     now = time.time() if now is None else now
     with store.db() as c:
-        rows = [dict(r) for r in c.execute('''SELECT j.id,j.brand,j.stage,j.state,j.updated,t.origin,
+        rows = [dict(r) for r in c.execute('''SELECT j.id,j.brand,j.recipient,j.stage,j.state,j.updated,t.origin,
             a.result,a.updated AS accepted_at,
             json_extract(j.payload,'$.delivery.result') AS delivery
             FROM jobs j LEFT JOIN timing t ON t.job_id=j.id LEFT JOIN attempts a ON a.job_id=j.id
             WHERE j.company_key!='' ORDER BY j.updated DESC LIMIT 500''')]
         stages = [dict(r) for r in c.execute('SELECT stage,started,ended,outcome FROM stage_times ORDER BY id DESC LIMIT 2000')]
         calls = [dict(r) for r in c.execute('SELECT stage,started,ended,state FROM runs ORDER BY started DESC LIMIT 2000')]
+        events = [dict(r) for r in c.execute('SELECT recipient,kind,at FROM events')]
     brands = {}
     for row in rows:
         b = brands.setdefault(row['brand'], {'accepted': [], 'prepared': [], 'accepted_at': [], 'active': 0, 'over_target': 0, 'unknown': 0, 'blocked': 0, 'unmeasured_legacy': 0})
@@ -44,6 +45,17 @@ def report(store, target=300, now=None):
             'accepted_within_target': sum(x <= target for x in values['accepted']),
             **{k: values[k] for k in ('active', 'over_target', 'unknown', 'blocked', 'unmeasured_legacy')},
         }
+        contacts={}
+        for row in rows:
+            if row['brand']==brand and row['result']=='accepted':
+                contacts[row['recipient']]=min(contacts.get(row['recipient'],row['accepted_at']),row['accepted_at'])
+        def contact_count(kind):
+            return len({event['recipient'] for event in events if event['kind']==kind and event['recipient'] in contacts and event['at']>=contacts[event['recipient']]})
+        replies=contact_count('reply')
+        result[brand]['outreach_results']={'accepted_contacts':len(contacts),'recorded_reply_contacts':replies,
+            'recorded_reply_rate':round(replies/len(contacts),4) if contacts else None,
+            'unsubscribe_contacts':contact_count('unsubscribe'),'refusal_contacts':contact_count('hard_reject'),
+            'qualification':'Recorded replies may include automatic replies; not a positive-interest or conversion rate.'}
     def timings(data, finished):
         names = sorted({r['stage'] for r in data})
         return {stage: distribution([max(0,r['ended']-r['started']) for r in data if r['stage']==stage and r['ended'] is not None and finished(r)]) for stage in names}

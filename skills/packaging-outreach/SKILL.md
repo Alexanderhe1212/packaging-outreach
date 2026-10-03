@@ -9,6 +9,8 @@ Use the standalone tool at https://github.com/Alexanderhe1212/packaging-outreach
 
 For other products or speed optimization read [products-and-speed.md](references/products-and-speed.md). Keep the repository/CLI name stable; select a product profile instead of rewriting the delivery engine.
 
+For smaller/cheaper models or reply-focused outreach, read [economy.md](references/economy.md). Focus on useful product proposals and responses; do not expand into billing or multi-tenant features unless newly requested.
+
 ## Start with the user's existing authorization and state
 
 1. Locate the explicitly supplied workspace/config. Do not guess Desktop paths or overwrite an existing project. Keep separate sender profiles and preserve existing databases, held jobs, logs, replies, opt-outs and uncertain submissions.

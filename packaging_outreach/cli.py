@@ -4,6 +4,7 @@ from pathlib import Path
 from .config import load,example
 from .engine import Engine
 from . import mail
+from .providers import provider_for
 
 def doctor(c):
     issues=[]
@@ -12,9 +13,13 @@ def doctor(c):
         if p.get('api_key_env') and not os.environ.get(p['api_key_env']):issues.append('Missing '+p['api_key_env'])
         if p.get('kind')!='agent_http' and (not p.get('model') or p['model'].startswith('YOUR_')):issues.append('Configure '+key+' model')
     if c['providers']['research']['kind']=='chat':issues.append('Research requires web-enabled responses or agent_http')
+    mode=c.get('workflow',{}).get('mode','balanced')
+    visual=provider_for(c,'identity' if mode=='economy' else 'draft')
+    if visual.get('vision') is False:issues.append('Configure a vision-capable provider for product identity')
     for b in c['brands']:
         if c.get('auto_send') and not os.environ.get(b['password_env']):issues.append('Missing '+b['password_env'])
-    return {'ready':not issues,'issues':issues,'mode':'automatic_send' if c.get('auto_send') else 'prepare_and_export'}
+    return {'ready':not issues,'issues':issues,'mode':'automatic_send' if c.get('auto_send') else 'prepare_and_export','workflow_mode':mode,
+      'capabilities':{'research':'live search provider or agent','planning':'text-only model','visual_identity':'vision-capable model','concept':'reference-image generation'},'compatibility_verified':'local configuration only; actual API response required'}
 
 def main(argv=None):
     p=argparse.ArgumentParser(prog='packaging-outreach');p.add_argument('--config',default='outreach.json')

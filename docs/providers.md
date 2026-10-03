@@ -50,6 +50,8 @@ API credentials are never sent to redirected hosts: the client does not follow A
 For JavaScript sites, a trusted web-enabled Agent can be configured with `source_mode: browser_excerpts`. Those hashes cover excerpts, not original HTTP pages; this mode deliberately trusts the chosen research provider's collection. Product image URLs still must appear in its source evidence.
 # Stage-specific speed settings (v0.2)
 
+For v0.3 economy mode, `providers.vision` handles the new `identity` API stage; `plan` returns the normal A/B plan plus `email` slots. The pipeline's durable job stages are unchanged. See [economy](economy.md). Chat providers accept `json_mode: prompt` to omit `response_format`, and `token_limit_parameter: max_tokens` for older compatible services. Text-only requests now use a plain string content; vision requests always retain their image inputs. No vendor/version names are inferred as capabilities.
+
 `providers.plan` and `providers.draft` optionally override the shared `providers.text` adapter. Plan can use a fast text model; draft requires vision. `max_output_tokens` and `reasoning_effort` are sent only when configured, using each endpoint's field names. `providers.image` optionally accepts `quality`, `size`, and model-supported `input_fidelity`. The PNG/reference-input contract is unchanged.
 
 `provider_concurrency` limits concurrent calls **across all accounts** in a workspace; `concurrency` controls per-account stages. Neither increases the API vendor's quota. See [performance](performance.md).
