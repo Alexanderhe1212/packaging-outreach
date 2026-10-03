@@ -1,0 +1,71 @@
+{
+  "workspace": "runtime",
+  "auto_discover": true,
+  "auto_send": false,
+  "api": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OUTREACH_API_KEY",
+    "text_model": "YOUR_TEXT_MODEL",
+    "image_model": "YOUR_IMAGE_MODEL"
+  },
+  "brands": [
+    {
+      "id": "brand-a",
+      "name": "My display company",
+      "sender": "hello@example.com",
+      "whatsapp": "15555550100",
+      "signature": "Your name | My display company",
+      "smtp_host": "smtp.example.com",
+      "smtp_port": 465,
+      "imap_host": "imap.example.com",
+      "imap_port": 993,
+      "password_env": "BRAND_A_MAIL_PASSWORD"
+    }
+  ],
+  "product_profile": "retail-displays",
+  "concurrency": {
+    "research": 1,
+    "concept": 2,
+    "draft": 1,
+    "send": 1
+  },
+  "provider_concurrency": {
+    "research": 1,
+    "text": 2,
+    "image": 2
+  },
+  "performance": {
+    "target_seconds": 300,
+    "page_cache_seconds": 900,
+    "max_pending_per_brand": 4
+  },
+  "source_mode": "direct_https",
+  "material_manifest": null,
+  "product_profiles": {
+    "retail-displays": {
+      "name": "Custom retail displays",
+      "offer": "Custom countertop display stands for the customer’s real products",
+      "target": "Beauty and jewelry brands with products displayed by retail partners",
+      "design_rules": "Stable base, product-sized shelves or cutouts, credible assembly and material thickness. Do not invent dimensions or load ratings.",
+      "validation_note": "Dimensions, stability and load require physical sample validation.",
+      "price_policy": {
+        "required": false
+      },
+      "structures": {
+        "stepped": "Stepped countertop presentation",
+        "backboard": "Base and vertical branded backboard",
+        "rotating": "Rotating countertop stand with plausible bearing assembly"
+      },
+      "supports": [
+        "fitted-cutout",
+        "shelf",
+        "hook"
+      ],
+      "accessories": [
+        "price-card-holder",
+        "removable-header"
+      ],
+      "material_manifest": null
+    }
+  }
+}

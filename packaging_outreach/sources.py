@@ -80,7 +80,8 @@ def fetch_public(url,allowed,max_bytes=2000000,timeout=20,allow_synthetic=False)
     raise Blocked('Redirect limit exceeded')
 
 def verify_candidate(x,request,fetcher,allow_browser=False):
-    required=('company','brand_marker','recipient','company_url','email_source_url','product_evidence_url','product_facts','retail_price')
+    policy=request.get('price_policy',{'required':True,'minimum':100,'currencies':['USD','EUR']})
+    required=('company','brand_marker','recipient','company_url','email_source_url','product_evidence_url','product_facts')
     if not all(x.get(k) for k in required):raise Blocked('Incomplete candidate; missing official evidence/price')
     company=x['company'];recipient=x['recipient'].lower()
     if not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+',recipient):raise Blocked('Invalid published email')
@@ -102,12 +103,21 @@ def verify_candidate(x,request,fetcher,allow_browser=False):
     if recipient not in [s.lower() for s in published]:raise Blocked('Recipient not exactly published')
     facts=x['product_facts']
     if not isinstance(facts,list) or not facts or any(not isinstance(f,str) or not f.strip() or normalize(f) not in normalize(product['text']) for f in facts):raise Blocked('Each product fact must be a literal official-page excerpt')
-    price=x['retail_price'];amount=price.get('amount');currency=price.get('currency');quote=price.get('source_quote','')
-    if isinstance(amount,bool) or not isinstance(amount,(int,float)) or amount<100 or currency not in ('USD','EUR'):raise Blocked('Official exact-SKU price must meet USD/EUR100; no guessed FX')
+    price=x.get('retail_price')
+    if price is None and not policy.get('required'):
+        validated_price=None
+    else:
+        validated_price=verify_price(price,x,product,policy)
+    payload=dict(company_url=x['company_url'],email_source_url=contact['url'],checked_at=contact['checked_at'],facts=facts,product_facts=facts,public_emails=[recipient],email_evidence=[{'email':recipient,'source_url':contact['url'],'role':'published_business_contact; purchasing_authority_not_established'}],product_evidence_url=product['url'],retail_price=validated_price,purchase_intent='not_established',purchasing_authority='not_established',engineering_approved=False,source_origin=('official_subscription_public_browser' if allow_browser else 'direct_public_official_fetch'),source_evidence=[{k:p[k] for k in ('url','sha256','checked_at')} for p in pages.values()],inferences=[])
+    return {'company':company,'recipient':recipient,'payload':payload}
+
+def verify_price(price,x,product,policy):
+    if not isinstance(price,dict):raise Blocked('Profile requires an official exact-SKU price')
+    amount=price.get('amount');currency=price.get('currency');quote=price.get('source_quote','')
+    if type(amount) not in (int,float) or not policy.get('minimum',0)<=amount<float('inf') or not isinstance(currency,str) or not re.fullmatch(r'[A-Z]{3}',currency) or (policy.get('currencies') and currency not in policy['currencies']):raise Blocked('Price does not meet configured exact-SKU policy; no guessed FX')
     if price.get('product_url')!=x['product_evidence_url'] or not quote or normalize(quote) not in normalize(product['text']):raise Blocked('Price source must be exact target SKU page and literal quote')
     token=r'(?<![\d.,])'+(str(int(amount))+r'(?:[.,]00)?' if amount==int(amount) else re.escape(f'{amount:.2f}').replace(r'\.',r'[.,]'))+r'(?![\d.,])'
     # Intentionally conservative: localized/comma prices require a reviewed parser.
     currency_present=bool(re.search(r'\b'+currency+r'\b',quote)) or (currency=='EUR' and '€' in quote) or (currency=='USD' and '$' in quote and 'USD' in product['text'])
     if not re.search(token,quote) or not currency_present:raise Blocked('Price amount/currency not present in exact quote')
-    payload=dict(company_url=x['company_url'],email_source_url=contact['url'],checked_at=contact['checked_at'],facts=facts,product_facts=facts,public_emails=[recipient],email_evidence=[{'email':recipient,'source_url':contact['url'],'role':'published_business_contact; purchasing_authority_not_established'}],product_evidence_url=product['url'],retail_price=dict(amount=amount,currency=currency,product_url=product['url'],checked_at=product['checked_at'],source_quote=quote),purchase_intent='not_established',purchasing_authority='not_established',engineering_approved=False,source_origin=('official_subscription_public_browser' if allow_browser else 'direct_public_official_fetch'),source_evidence=[{k:p[k] for k in ('url','sha256','checked_at')} for p in pages.values()],inferences=[])
-    return {'company':company,'recipient':recipient,'payload':payload}
+    return dict(amount=amount,currency=currency,product_url=product['url'],checked_at=product['checked_at'],source_quote=quote)

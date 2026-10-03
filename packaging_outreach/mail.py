@@ -15,11 +15,11 @@ def render(brand,payload,mid):
     footer='Reply "unsubscribe" to stop receiving these proposals.'
     msg.set_content(d['body']+'\n\nOption A: '+links[0]+'\nOption B: '+links[1]+'\n\n'+brand['signature']+'\n'+footer)
     markup=''.join('<p>'+html.escape(x).replace('\n','<br>')+'</p>' for x in d['body'].split('\n\n'))
-    markup+='<img src="cid:concept" alt="A and B packaging concepts" style="width:100%;max-width:900px">'
+    markup+='<img src="cid:concept" alt="A and B product concepts" style="width:100%;max-width:900px">'
     markup+='<p><a href="'+html.escape(links[0],quote=True)+'">Discuss option A on WhatsApp</a><br><a href="'+html.escape(links[1],quote=True)+'">Discuss option B on WhatsApp</a></p>'
     markup+='<p>'+html.escape(brand['signature']).replace('\n','<br>')+'</p><p>'+footer+'</p>'
     msg.add_alternative('<!doctype html><html><body>'+markup+'</body></html>',subtype='html')
-    msg.get_payload()[-1].add_related(base64.b64decode(payload['concept_png']),maintype='image',subtype='png',cid='<concept>',disposition='inline',filename='packaging-concepts.png')
+    msg.get_payload()[-1].add_related(base64.b64decode(payload['concept_png']),maintype='image',subtype='png',cid='<concept>',disposition='inline',filename='product-concepts.png')
     return msg
 
 def sync(store,brand,recipient=None):

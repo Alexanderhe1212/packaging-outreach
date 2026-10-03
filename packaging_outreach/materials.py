@@ -13,15 +13,16 @@ BOXES={
 INSERTS=['folded-card','corrugated','pearl-foam','sponge','black-eva','white-eva','clear-thermoform','flocked-thermoform']
 ACCESSORIES=['grosgrain-ribbon','satin-ribbon','two-tone-ribbon','printed-ribbon','handle-cord','wrapping-tissue','decorative-filler']
 
-def context(store):
- with store.db() as c:rows=c.execute("SELECT payload FROM jobs WHERE stage IN ('draft','send','done') ORDER BY updated DESC LIMIT 12").fetchall()
- recent=[json.loads(x[0]).get('plan',{}) for x in rows]
- return {'boxes':BOXES,'inserts':INSERTS,'accessories':ACCESSORIES,'recent_selections':[{k:r.get(k,{}).get('box') for k in ['a','b']} for r in recent]}
+def context(store,profile=None):
+ with store.db() as c:rows=c.execute("SELECT payload FROM jobs WHERE stage IN ('draft','send','done') ORDER BY updated DESC LIMIT 60").fetchall()
+ payloads=[json.loads(x[0]) for x in rows]
+ recent=[x.get('plan',{}) for x in payloads if not profile or x.get('seller_profile',{}).get('id', 'premium-packaging')==profile['id']][:12]
+ return {'structures':profile['structures'] if profile else BOXES,'supports':profile['supports'] if profile else INSERTS,'accessories':profile['accessories'] if profile else ACCESSORIES,'recent_selections':[{k:r.get(k,{}).get('structure',r.get(k,{}).get('box')) for k in ['a','b']} for r in recent]}
 
 def selected_images(plan,manifest_path):
  if not manifest_path:return []
  manifest_path=Path(manifest_path);root=manifest_path.parent.resolve();manifest=json.loads(manifest_path.read_text());wanted=set()
- for option in [plan['a'],plan['b']]:wanted.update([option['box'],option['insert']]+option.get('accessories',[]))
+ for option in [plan['a'],plan['b']]:wanted.update([option.get('structure',option.get('box')),option.get('support',option.get('insert'))]+option.get('accessories',[]))
  result=[];seen=set()
  for entry in manifest.get('references',[]):
   if not wanted.intersection(entry['ids']):continue

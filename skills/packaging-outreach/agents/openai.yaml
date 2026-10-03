@@ -1,4 +1,4 @@
 interface:
   display_name: "Packaging Outreach"
-  short_description: "Run personalized packaging outreach with any agent"
-  default_prompt: "Use $packaging-outreach to research suitable brands, create varied packaging concepts, and run my configured outreach workflow."
+  short_description: "Run product-specific trade outreach with any agent"
+  default_prompt: "Use $packaging-outreach with my product profile to research customers, create tailored concepts, and run my accounts while measuring complete email turnaround."

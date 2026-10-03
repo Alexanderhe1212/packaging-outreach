@@ -21,6 +21,18 @@
       "imap_host": "imap.example.com",
       "imap_port": 993,
       "password_env": "BRAND_A_MAIL_PASSWORD"
+    },
+    {
+      "id": "brand-b",
+      "name": "Second sales brand",
+      "sender": "sales@example.org",
+      "whatsapp": "15555550200",
+      "signature": "Your name | Second sales brand",
+      "smtp_host": "smtp.example.com",
+      "smtp_port": 465,
+      "imap_host": "imap.example.com",
+      "imap_port": 993,
+      "password_env": "BRAND_B_MAIL_PASSWORD"
     }
   ],
   "product_profile": "premium-packaging",
@@ -41,5 +53,15 @@
     "max_pending_per_brand": 4
   },
   "source_mode": "direct_https",
-  "material_manifest": null
+  "material_manifest": null,
+  "providers": {
+    "image": {
+      "kind": "image_edits",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OUTREACH_API_KEY",
+      "model": "YOUR_IMAGE_MODEL",
+      "quality": "medium",
+      "size": "1536x1024"
+    }
+  }
 }

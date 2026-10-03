@@ -48,3 +48,10 @@ API credentials are never sent to redirected hosts: the client does not follow A
 `source_mode: direct_https` uses pinned public HTTPS fetches for exact official evidence. Private, loopback and link-local source addresses are rejected. Model APIs are separate explicitly configured endpoints and may be local.
 
 For JavaScript sites, a trusted web-enabled Agent can be configured with `source_mode: browser_excerpts`. Those hashes cover excerpts, not original HTTP pages; this mode deliberately trusts the chosen research provider's collection. Product image URLs still must appear in its source evidence.
+# Stage-specific speed settings (v0.2)
+
+`providers.plan` and `providers.draft` optionally override the shared `providers.text` adapter. Plan can use a fast text model; draft requires vision. `max_output_tokens` and `reasoning_effort` are sent only when configured, using each endpoint's field names. `providers.image` optionally accepts `quality`, `size`, and model-supported `input_fidelity`. The PNG/reference-input contract is unchanged.
+
+`provider_concurrency` limits concurrent calls **across all accounts** in a workspace; `concurrency` controls per-account stages. Neither increases the API vendor's quota. See [performance](performance.md).
+
+Stage payloads now include `seller_profile`. Plan output uses `structure`/`support`; legacy `box`/`insert` output remains accepted. Research receives `price_policy`, `seller_offer`, excluded domains and excluded recipients. When the profile does not require price, `retail_price` may be null. The agent must still provide real website/email/product/image evidence.

@@ -16,6 +16,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS events(recipient TEXT,kind TEXT,evidence TEXT,at REAL,UNIQUE(recipient,kind,evidence));
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);
             CREATE TABLE IF NOT EXISTS followups(job_id TEXT PRIMARY KEY,source_attempt TEXT,evidence TEXT);
+            CREATE TABLE IF NOT EXISTS timing(job_id TEXT PRIMARY KEY,created REAL,origin REAL);
+            CREATE TABLE IF NOT EXISTS stage_times(id INTEGER PRIMARY KEY,job_id TEXT,stage TEXT,started REAL,ended REAL,outcome TEXT);
+            CREATE INDEX IF NOT EXISTS stage_times_job ON stage_times(job_id);
             INSERT OR IGNORE INTO settings VALUES('paused','true');
             ''')
     @contextlib.contextmanager
@@ -36,6 +39,7 @@ class Store:
             c.execute("UPDATE jobs SET state='unknown' WHERE state='running'")
             c.execute("UPDATE runs SET state='unknown' WHERE state='running'")
             c.execute("UPDATE attempts SET result='unknown' WHERE result='in_progress'")
+            c.execute("UPDATE stage_times SET ended=?,outcome='unknown' WHERE ended IS NULL",(time.time(),))
             c.execute("INSERT OR REPLACE INTO settings VALUES('worker',?)",(json.dumps({'owner':owner,'at':time.time()}),))
     def heartbeat(self,owner):
         with self.db() as c:
@@ -46,7 +50,7 @@ class Store:
         with self.db() as c:
             row=c.execute("SELECT value FROM settings WHERE key='worker'").fetchone()
             if row and json.loads(row[0])['owner']==owner:c.execute("DELETE FROM settings WHERE key='worker'")
-    def add(self,brand,payload,stage='research',followup_of=None,evidence=None):
+    def add(self,brand,payload,stage='research',followup_of=None,evidence=None,origin=None):
         from .sources import host
         company_key=host(payload['company_url']) if payload.get('company_url') else ''
         recipient=payload.get('recipient','').lower();jid=str(uuid.uuid4())
@@ -59,6 +63,7 @@ class Store:
                 if not source or source['brand']!=brand or not evidence:raise ValueError('Follow-up needs an accepted same-brand source and explicit new-value evidence')
                 c.execute('INSERT INTO followups VALUES(?,?,?)',(jid,followup_of,evidence))
             c.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,0)',(jid,brand,company_key,recipient,stage,'queued',json.dumps(payload,ensure_ascii=False),time.time()))
+            now=time.time();c.execute('INSERT INTO timing VALUES(?,?,?)',(jid,now,origin if origin is not None else now))
         return jid
     def get(self,jid):
         with self.db() as c:r=dict(c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone())
@@ -69,12 +74,18 @@ class Store:
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')
             if c.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0]=='true':return False
-            return c.execute("UPDATE jobs SET state='running',updated=? WHERE id=? AND state='queued'",(time.time(),jid)).rowcount==1
+            now=time.time();claimed=c.execute("UPDATE jobs SET state='running',updated=? WHERE id=? AND state='queued'",(now,jid)).rowcount==1
+            if claimed:c.execute('INSERT INTO stage_times(job_id,stage,started) SELECT id,stage,? FROM jobs WHERE id=?',(now,jid))
+            return claimed
     def advance(self,jid,stage,payload,state='queued'):
-        with self.db() as c:c.execute('UPDATE jobs SET stage=?,state=?,payload=?,updated=?,next_at=0 WHERE id=?',(stage,state,json.dumps(payload,ensure_ascii=False),time.time(),jid))
+        with self.db() as c:
+            now=time.time();c.execute('UPDATE jobs SET stage=?,state=?,payload=?,updated=?,next_at=0 WHERE id=?',(stage,state,json.dumps(payload,ensure_ascii=False),now,jid))
+            c.execute('UPDATE stage_times SET ended=?,outcome=? WHERE job_id=? AND ended IS NULL',(now,state,jid))
     def fail(self,jid,state,error,delay=0):
         job=self.get(jid);p=job['payload'];p['last_error']=error
-        with self.db() as c:c.execute('UPDATE jobs SET state=?,payload=?,next_at=?,updated=? WHERE id=?',(state,json.dumps(p,ensure_ascii=False),time.time()+delay,time.time(),jid))
+        with self.db() as c:
+            now=time.time();c.execute('UPDATE jobs SET state=?,payload=?,next_at=?,updated=? WHERE id=?',(state,json.dumps(p,ensure_ascii=False),now+delay,now,jid))
+            c.execute('UPDATE stage_times SET ended=?,outcome=? WHERE job_id=? AND ended IS NULL',(now,state,jid))
     def cached_call(self,jid,stage,fn):
         rid=str(uuid.uuid5(uuid.NAMESPACE_URL,jid+':'+stage))
         with self.db() as c:
