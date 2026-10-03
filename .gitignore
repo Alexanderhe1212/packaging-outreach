@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.env
+.env.*
+!.env.example
+outreach.json
+runtime/
+private/
+*.sqlite3*
+*.db
+*.eml
+*.pdf
+.DS_Store

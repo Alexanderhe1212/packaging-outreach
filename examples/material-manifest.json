@@ -1,0 +1,20 @@
+{
+  "references": [
+    {
+      "ids": [
+        "double-door",
+        "shoulder"
+      ],
+      "file": "box-reference.png",
+      "sha256": "REPLACE_WITH_SHA256_OF_YOUR_PRIVATE_PNG"
+    },
+    {
+      "ids": [
+        "folded-card",
+        "black-eva"
+      ],
+      "file": "insert-reference.png",
+      "sha256": "REPLACE_WITH_SHA256_OF_YOUR_PRIVATE_PNG"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "workspace": "runtime",
+  "auto_discover": true,
+  "auto_send": false,
+  "target": "Premium perfume, jewelry and suitable gift brands in developed markets; official business email, real product, USD/EUR100+ SKU. No invented purchase intent.",
+  "api": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OUTREACH_API_KEY",
+    "text_model": "YOUR_TEXT_MODEL",
+    "image_model": "YOUR_IMAGE_MODEL"
+  },
+  "brands": [
+    {
+      "id": "brand-a",
+      "name": "My packaging company",
+      "sender": "hello@example.com",
+      "whatsapp": "15555550100",
+      "signature": "Your name | Your packaging company",
+      "smtp_host": "smtp.example.com",
+      "smtp_port": 465,
+      "imap_host": "imap.example.com",
+      "imap_port": 993,
+      "password_env": "BRAND_A_MAIL_PASSWORD"
+    }
+  ],
+  "concurrency": {
+    "research": 1,
+    "concept": 2,
+    "draft": 1,
+    "send": 1
+  },
+  "source_mode": "direct_https",
+  "material_manifest": null
+}
