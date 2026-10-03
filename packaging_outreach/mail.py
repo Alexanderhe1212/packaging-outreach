@@ -6,9 +6,10 @@ from pathlib import Path
 from urllib.parse import urlencode
 from . import transport
 from .config import secret
+from .salutation import with_greeting
 
 def render(brand,payload,mid):
-    d=payload['draft'];msg=EmailMessage(policy=policy.SMTP)
+    d=dict(payload['draft']);d['body']=with_greeting(d['body'],payload['company']);msg=EmailMessage(policy=policy.SMTP)
     msg['From']=brand['sender'];msg['To']=payload['recipient'];msg['Subject']=d['subject'];msg['Message-ID']=mid;msg['Date']=formatdate(localtime=False)
     msg['List-Unsubscribe']='<mailto:'+brand['sender']+'?subject=Unsubscribe>'
     links=['https://wa.me/'+brand['whatsapp']+'?'+urlencode({'text':'Please tell me more about option '+letter+' for '+payload['company']}) for letter in ['A','B']]
