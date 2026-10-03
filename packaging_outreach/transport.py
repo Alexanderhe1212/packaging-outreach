@@ -3,6 +3,16 @@ import hashlib,imaplib,re,smtplib,ssl,time,socket
 from email import policy
 from email.parser import BytesParser
 
+RUNTIME_REVISION = 'smtp-finalack120-v2'
+DEFAULT_FINAL_ACK_TIMEOUT = 120
+
+def timeout_settings(config):
+    write=float(config.get('data_write_timeout_seconds',90))
+    ack=float(config.get('final_ack_timeout_seconds',DEFAULT_FINAL_ACK_TIMEOUT))
+    if not 20<=write<=90 or not 20<=ack<=180:
+        raise ValueError('Bounded DATA/final-ack timeout required')
+    return write,ack
+
 class StageFailure(Exception):
     def __init__(self,code,stage):self.code,self.stage=code,stage
 
@@ -15,10 +25,12 @@ def send_once(raw,sender,recipient,password,config,event,smtp_factory=None):
     def expect(code,allowed):
         if code not in allowed:raise StageFailure(code,stage)
     try:
+        # Validate before connecting or issuing DATA. Waiting longer never resends bytes.
+        write_timeout,ack_timeout=timeout_settings(config)
         context=ssl.create_default_context()
         factory=smtp_factory or smtplib.SMTP_SSL
         client=factory(config['smtp_host'],config['smtp_port'],timeout=20,context=context)
-        mark('connected',mime_bytes=len(raw),socket_timeout_seconds=20);expect(client.ehlo()[0],{250});mark('ehlo',size_limit=getattr(client,'esmtp_features',{}).get('size'))
+        mark('connected',mime_bytes=len(raw),socket_timeout_seconds=20,transport_revision=RUNTIME_REVISION,final_ack_timeout_seconds=ack_timeout);expect(client.ehlo()[0],{250});mark('ehlo',size_limit=getattr(client,'esmtp_features',{}).get('size'))
         expect(client.login(sender,password)[0],{235,503});mark('authenticated')
         # Match stdlib sendmail's optional SIZE declaration without changing DATA.
         features=getattr(client,'esmtp_features',{});mail_options=[]
@@ -29,8 +41,6 @@ def send_once(raw,sender,recipient,password,config,event,smtp_factory=None):
         mark('rcpt');code,_=client.rcpt(recipient);expect(code,{250,251});mark('rcpt_accepted',code=code)
         mark('data_command');client.putcmd('data');code,_=client.getreply();expect(code,{354})
         # Write a durable uncertainty marker before any body bytes reach the socket.
-        write_timeout=float(config.get('data_write_timeout_seconds',90));ack_timeout=float(config.get('final_ack_timeout_seconds',90))
-        if not 20<=write_timeout<=90 or not 20<=ack_timeout<=90:raise ValueError('Bounded DATA timeout required')
         if getattr(client,'sock',None):client.sock.settimeout(write_timeout)
         mark('data_started',data_reply_code=code,socket_timeout_seconds=write_timeout)
         normalized=re.sub(br'\r\n|\r|\n',b'\r\n',raw)
