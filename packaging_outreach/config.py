@@ -56,10 +56,10 @@ def secret(name):
 
 def example():
     return {'workspace':'runtime','auto_discover':True,'auto_send':False,
-      'target':'Premium perfume, jewelry and suitable gift brands in developed markets; official business email, real product, USD/EUR100+ SKU. No invented purchase intent.',
+      'target':'Businesses with products suited to custom paper or gift packaging, including publicly operating small businesses and packaging intermediaries. Official business email and real product evidence; no minimum retail price or invented purchase intent.',
       'api':{'base_url':'https://api.openai.com/v1','api_key_env':'OUTREACH_API_KEY','text_model':'YOUR_TEXT_MODEL','image_model':'YOUR_IMAGE_MODEL'},
       'brands':[{'id':'brand-a','name':'My packaging company','sender':'hello@example.com','whatsapp':'15555550100','signature':'Your name | Your packaging company','smtp_host':'smtp.example.com','smtp_port':465,'imap_host':'imap.example.com','imap_port':993,'password_env':'BRAND_A_MAIL_PASSWORD'}],
-      'product_profile':'premium-packaging',
+      'product_profile':'paper-packaging',
       'concurrency':{'research':1,'concept':2,'draft':1,'send':1},
       'provider_concurrency':{'research':1,'text':2,'image':2},
       'performance':{'target_seconds':300,'page_cache_seconds':900,'max_pending_per_brand':4},

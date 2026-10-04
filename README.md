@@ -83,7 +83,7 @@ python3 scripts/install_skill.py --target ~/.agents/skills
 
 你的 PDF、签名、客户库、邮箱配置和密钥不在开源仓库内。把有权使用的盒型、内衬、手提绳、丝带和拷贝纸/填充参考图片放在私有目录，以 [材料清单格式](examples/material-manifest.json) 关联目录 ID 与 SHA-256。流程只附加选中的参考图。概念图不代表工程、承重或样品批准。
 
-默认包装配置筛选官方商品价格 USD/EUR 100+；其他产品可以配置价格条件或不要求公开零售价。跨币种换算和复杂集团域名映射未实现。采购意向只按证据表达。`source_mode: direct_https` 获取官网来源并短期缓存；确需依赖你可信的联网 Agent 摘录时可显式配置 `browser_excerpts`，这不等同于独立抓取原网页。
+新配置示例使用 `paper-packaging`，按纸盒、礼盒适配性广泛获客，不要求公开零售价。食品、美妆、数码、服饰、文创、渠道商及公开经营的小微商家均可纳入；原 `premium-packaging` 的 USD/EUR 100+ 筛选仍可显式选择。跨币种换算和复杂集团域名映射未实现。采购意向只按证据表达。`source_mode: direct_https` 获取官网来源并短期缓存；确需依赖你可信的联网 Agent 摘录时可显式配置 `browser_excerpts`，这不等同于独立抓取原网页。
 
 ## 状态、回复与恢复
 

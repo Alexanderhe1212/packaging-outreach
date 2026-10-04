@@ -16,9 +16,21 @@ PACKAGING = {
 }
 
 
+PAPER_PACKAGING = copy.deepcopy(PACKAGING)
+PAPER_PACKAGING.update(id='paper-packaging', name='Custom paper and gift packaging',
+    offer='Custom paper boxes, gift boxes and product-fitting paper packaging.',
+    target='Food, beverage, beauty, personal care, electronics, apparel, accessories, DTC, '
+        'gifts, stationery, wellness outer packaging, design agencies, print resellers and publicly operating artisans. '
+        'Use published business contacts and actual products. No minimum retail price or business size. '
+        'Do not infer purchase intent, MOQ, food-contact or medical certification.',
+    price_policy={'required':False})
+
+
 def resolve(config, brand=None):
     key = (brand or {}).get('product_profile', config.get('product_profile', 'premium-packaging'))
-    if key == 'premium-packaging':
+    if key == 'paper-packaging':
+        result = copy.deepcopy(PAPER_PACKAGING)
+    elif key == 'premium-packaging':
         result = copy.deepcopy(PACKAGING)
     else:
         result = copy.deepcopy(config.get('product_profiles', {}).get(key, {}))
