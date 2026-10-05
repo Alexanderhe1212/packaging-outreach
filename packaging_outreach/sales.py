@@ -1,7 +1,8 @@
 """Small grounded email slots; fixed layout, service claims and one reply question."""
 from .sources import normalize
 
-REPLY_QUESTION = 'Which direction is closer to what you have in mind, A or B?'
+REPLY_QUESTION = 'Would you like a short materials and structure breakdown for A or B? Just reply A or B.'
+PACKAGING_REPLY_QUESTION = 'Would you like a short materials and insert breakdown for A or B? Just reply A or B.'
 
 
 def brief(payload, profile, brand):
@@ -16,7 +17,7 @@ def brief(payload, profile, brand):
         'seller_profile': {k:profile[k] for k in ('id','name','offer','design_rules','validation_note')},
         'sender_name': brand['name'],
         'services': services,
-        'reply_question': REPLY_QUESTION,
+        'reply_question': PACKAGING_REPLY_QUESTION if profile['id'] in ('paper-packaging','premium-packaging') else REPLY_QUESTION,
     }
 
 
@@ -36,7 +37,7 @@ def compose(slots, data):
     if service_id not in data['services']:raise ValueError('Unknown seller service; do not invent capabilities')
     body='\n\n'.join([slots['opening'].strip(),
         'A — '+slots['a_value'].strip(), 'B — '+slots['b_value'].strip(),
-        data['services'][service_id],data['seller_profile']['validation_note'],REPLY_QUESTION])
+        data['services'][service_id],data['seller_profile']['validation_note'],data.get('reply_question',REPLY_QUESTION)])
     if len(body)>2400:raise ValueError('Email must remain concise')
     return {'subject':slots['subject'].strip(),'body':body,
             'grounding':{'fact_index':index,'fact':fact,'service_id':service_id},
