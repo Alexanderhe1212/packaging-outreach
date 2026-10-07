@@ -2,7 +2,7 @@
 import base64,hashlib,json,time,uuid,threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
-from . import sources,materials,prompts,mail,profiles,performance,sales
+from . import sources,materials,prompts,mail,profiles,performance,sales,context
 from .cache import PageCache
 from .providers import HTTPProvider,RetryLater,UncertainCall
 from .images import validate_png
@@ -73,7 +73,8 @@ class Engine:
                     recipients=[r[0] for r in c.execute('SELECT DISTINCT recipient FROM events')]
                     timing=c.execute('SELECT origin FROM timing WHERE job_id=?',(jid,)).fetchone()
                 target=brand.get('target',self.config.get('target',profile['target']))
-                result=self.api(job,'research',prompts.RESEARCH_PROFILE,{'target':target,'seller_offer':profile['offer'],'price_policy':profile['price_policy'],'excluded_company_domains':excluded,'excluded_recipients':recipients})
+                seed=int(hashlib.sha256(jid.encode()).hexdigest()[:8],16)
+                result=self.api(job,'research',prompts.RESEARCH_PROFILE,{'target':target,'seller_offer':profile['offer'],'price_policy':profile['price_policy'],'excluded_company_domains':context.hints(excluded,seed),'excluded_recipients':context.hints(recipients,seed),'local_exclusion_counts':{'companies':len(excluded),'recipients':len(recipients)},'full_exclusions_enforced_locally':True})
                 candidate=result.get('candidate')
                 added=None
                 if candidate:
