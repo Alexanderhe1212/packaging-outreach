@@ -19,8 +19,8 @@ class Engine:
             with self.gates['research' if stage=='research' else 'image' if stage=='image' else 'text']:
                 return self.provider.call(stage,prompt,data,rid,images)
         return self.store.cached_call(job['id'],stage,call)
-    def status(self):
-        result=self.store.status();result['performance']=performance.report(self.store,self.config.get('performance',{}).get('target_seconds',300))
+    def status(self,limit=25,offset=0):
+        result=self.store.status(limit,offset);result['performance']=performance.report(self.store,self.config.get('performance',{}).get('target_seconds',300))
         status=self.store.setting('worker_status');result['worker']=json.loads(status) if status else None
         return result
     def reference(self,p):
@@ -69,19 +69,17 @@ class Engine:
             if stage=='research':
                 profile=profiles.resolve(self.config,brand)
                 with self.store.db() as c:
-                    excluded=[r[0] for r in c.execute("SELECT DISTINCT company_key FROM jobs WHERE company_key!=''")]
-                    recipients=[r[0] for r in c.execute('SELECT DISTINCT recipient FROM events')]
                     timing=c.execute('SELECT origin FROM timing WHERE job_id=?',(jid,)).fetchone()
                 target=brand.get('target',self.config.get('target',profile['target']))
                 seed=int(hashlib.sha256(jid.encode()).hexdigest()[:8],16)
-                result=self.api(job,'research',prompts.RESEARCH_PROFILE,{'target':target,'seller_offer':profile['offer'],'price_policy':profile['price_policy'],'excluded_company_domains':context.hints(excluded,seed),'excluded_recipients':context.hints(recipients,seed),'local_exclusion_counts':{'companies':len(excluded),'recipients':len(recipients)},'full_exclusions_enforced_locally':True})
+                result=self.api(job,'research',prompts.RESEARCH_PROFILE,dict(self.store.discovery_context(seed),target=target,seller_offer=profile['offer'],price_policy=profile['price_policy']))
                 candidate=result.get('candidate')
                 added=None
                 if candidate:
                     # Skip known domains before HTTP, planning or image spend.
-                    if sources.host(candidate['company_url']) not in excluded and candidate['recipient'].lower() not in recipients:
+                    if not self.store.discovery_known(sources.host(candidate['company_url']),candidate['recipient']):
                         verified=self.verify(candidate,result.get('pages',[]),brand);added=self.store.add(job['brand'],verified,'concept',origin=timing['origin'] if timing else None)
-                if not added:self.store.setting('discovery_next_at',time.time()+30)
+                if not added:self.store.setting('discovery_next_at',time.time()+5)
                 self.store.advance(jid,'done',{'candidate_found':bool(candidate),'new_job_id':added},'done');return
             if stage=='concept':
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference']}

@@ -17,3 +17,5 @@ The default research uses Responses with real `web_search`; text uses OpenAI-com
 `auto_send: false` exports emails. To send, configure TLS SMTP/IMAP plus a password environment reference, complete `mailbox-test --brand BRAND --image PNG`, then set `auto_send: true` and restart. The test is sent only to that profile's own sender address. API keys do not include mailbox credentials.
 
 For imported research use `enqueue --brand BRAND candidate.json`; it validates source evidence before entering concept generation. Run `sync --brand BRAND` to ingest known-contact replies. CLI JSON output can be consumed by any agent. HTTP `/status`, `/start`, `/pause` support local orchestration with a matching Host and JSON Content-Type.
+
+Normal status returns only 25 recent records; use `GET /status?limit=25&offset=25` for older metadata. Do not read every customer or image for progress reports. Discovery looks up the selected customer against the complete local index; bounded hints never replace that check.

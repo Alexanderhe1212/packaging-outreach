@@ -22,6 +22,9 @@ class Store:
             CREATE INDEX IF NOT EXISTS stage_times_job ON stage_times(job_id);
             CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(state,next_at,updated);
             CREATE INDEX IF NOT EXISTS jobs_company ON jobs(company_key);
+            CREATE INDEX IF NOT EXISTS jobs_recent ON jobs(updated DESC,id DESC);
+            CREATE INDEX IF NOT EXISTS attempts_recent ON attempts(updated DESC);
+            CREATE INDEX IF NOT EXISTS events_recent ON events(at DESC);
             CREATE INDEX IF NOT EXISTS attempts_company ON attempts(company_key,result);
             CREATE TABLE IF NOT EXISTS plan_summaries(job_id TEXT PRIMARY KEY,profile_id TEXT,plan TEXT,stage TEXT,updated REAL);
             CREATE INDEX IF NOT EXISTS plans_recent ON plan_summaries(updated DESC);
@@ -134,6 +137,22 @@ class Store:
             if any(r['result']!='accepted' for r in previous) or (previous and not permit):raise ValueError('Company already contacted or outcome unknown')
             aid=str(uuid.uuid4());c.execute('INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?)',(aid,job['id'],job['company_key'],job['recipient'],mid,'in_progress','claimed',sha,time.time()))
             return aid
-    def status(self):
+    def status(self,limit=25,offset=0):
+        limit=max(1,min(int(limit),100));offset=max(0,int(offset))
         with self.db() as c:
-            return {'paused':self.setting('paused')!='false','jobs':[dict(r) for r in c.execute('SELECT id,brand,company_key,recipient,stage,state,updated FROM jobs ORDER BY updated DESC')],'attempts':[dict(r) for r in c.execute('SELECT * FROM attempts ORDER BY updated DESC')],'events':[dict(r) for r in c.execute('SELECT * FROM events ORDER BY at DESC')]}
+            return {'paused':self.setting('paused')!='false','recent_limit':limit,'history_offset':offset,'counts':{'jobs':c.execute('SELECT count(*) FROM jobs').fetchone()[0],'attempts':dict(c.execute('SELECT result,count(*) FROM attempts GROUP BY result'))},'jobs':[dict(r) for r in c.execute('SELECT id,brand,company_key,recipient,stage,state,updated FROM jobs ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?',(limit,offset))],'attempts':[dict(r) for r in c.execute('SELECT * FROM attempts ORDER BY updated DESC LIMIT ? OFFSET ?',(limit,offset))],'events':[dict(r) for r in c.execute('SELECT * FROM events ORDER BY at DESC LIMIT ? OFFSET ?',(limit,offset))]}
+
+    def discovery_context(self,seed):
+        from .context import hints
+        with self.db() as c:
+            companies=c.execute("SELECT count(DISTINCT company_key) FROM jobs WHERE company_key!=''").fetchone()[0]
+            recipients=c.execute('SELECT count(DISTINCT recipient) FROM events').fetchone()[0]
+            domains=[r[0] for r in c.execute("SELECT DISTINCT company_key FROM jobs WHERE company_key!='' ORDER BY company_key LIMIT 160 OFFSET ?",((seed*37)%companies if companies else 0,))]
+            contacts=[r[0] for r in c.execute('SELECT DISTINCT recipient FROM events ORDER BY recipient LIMIT 160 OFFSET ?',((seed*37)%recipients if recipients else 0,))]
+        return {'excluded_company_domains':hints(domains,0),'excluded_recipients':hints(contacts,0),
+                'local_exclusion_counts':{'companies':companies,'recipients':recipients},'full_exclusions_enforced_locally':True}
+
+    def discovery_known(self,domain,recipient):
+        with self.db() as c:
+            return bool(c.execute('SELECT 1 FROM jobs WHERE company_key=? LIMIT 1',(domain,)).fetchone() or
+                        c.execute('SELECT 1 FROM events WHERE recipient=? LIMIT 1',(recipient.lower(),)).fetchone())

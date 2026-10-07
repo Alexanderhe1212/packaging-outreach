@@ -79,6 +79,17 @@ def fetch_public(url,allowed,max_bytes=2000000,timeout=20,allow_synthetic=False)
         finally:conn.close()
     raise Blocked('Redirect limit exceeded')
 
+
+def grounded_facts(candidate, product_text):
+    proposed=candidate.get('product_facts',[])
+    if not isinstance(proposed,list):return []
+    anchors=proposed+[candidate.get('count_evidence_quote','')]
+    found=[]
+    for value in anchors:
+        if isinstance(value,str) and value.strip() and len(value)<=500 and normalize(value) in normalize(product_text) and value not in found:
+            found.append(value.strip())
+    return sorted(found,key=len)[:3]
+
 def verify_candidate(x,request,fetcher,allow_browser=False):
     policy=request.get('price_policy',{'required':True,'minimum':100,'currencies':['USD','EUR']})
     required=('company','brand_marker','recipient','company_url','email_source_url','product_evidence_url','product_facts')
@@ -101,8 +112,8 @@ def verify_candidate(x,request,fetcher,allow_browser=False):
     if normalize(x['brand_marker']) not in normalize(home['text']) and (len(normalize(company))<4 or normalize(company) not in normalize(home['text'])):raise Blocked('Neither brand marker nor exact company name present on company page')
     published=re.findall(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}',contact['text']+' '+' '.join(contact.get('mailto',[])),re.I)
     if recipient not in [s.lower() for s in published]:raise Blocked('Recipient not exactly published')
-    facts=x['product_facts']
-    if not isinstance(facts,list) or not facts or any(not isinstance(f,str) or not f.strip() or normalize(f) not in normalize(product['text']) for f in facts):raise Blocked('Each product fact must be a literal official-page excerpt')
+    facts=grounded_facts(x,product['text'])
+    if not facts:raise Blocked('One grounded product name or specification required')
     price=x.get('retail_price')
     if price is None and not policy.get('required'):
         validated_price=None

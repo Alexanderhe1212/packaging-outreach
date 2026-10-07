@@ -5,41 +5,22 @@ description: Run product-configurable trade outreach with real public customer r
 
 # Packaging Outreach
 
-Use the standalone tool at https://github.com/Alexanderhe1212/packaging-outreach. Read [runtime.md](references/runtime.md) for commands and provider setup. Read [workflow.md](references/workflow.md) for packaging and message constraints. No vendor-specific CLI or browser account is required.
+Use https://github.com/Alexanderhe1212/packaging-outreach with the user's existing configuration and authorization. No per-email approval or manual customer-ID spreadsheet.
 
-For other products or speed optimization read [products-and-speed.md](references/products-and-speed.md). Keep the repository/CLI name stable; select a product profile instead of rewriting the delivery engine.
+## Normal flow
 
-For smaller/cheaper models or reply-focused outreach, read [economy.md](references/economy.md). Focus on useful product proposals and responses; do not expand into billing or multi-tenant features unless newly requested.
+1. Read current status and at most 25 recent records. Open only the selected customer's details/image. Older records are paginated; do not reload the full history or all references.
+2. Find one suitable real business, its official product and exact public business email in one research pass. Give the model small index hints; check the selected domain/contact against the complete local index. Keep a few supported product facts and drop unsupported extra prose. No invented contact, purchase intent or pain.
+3. Use the actual product image in one A/B planning-and-email call. Choose packaging by the product, not retail price. A/B can mix structures. Carton options retain 1,000-piece MOQ. Use only relevant material references; fit matters more than novelty. Fold soft goods plausibly and preserve brand/SKU identity.
+4. Generate one product-bound A/B image. Perform one brief factual identity check; no subjective scoring loops or automatic redraws. Write a greeting, a concrete benefit for A/B and one easy reply invitation. The app adds the image, two sender-correct WhatsApp links, signature and opt-out.
+5. Send through the configured single final gate, record the result, and continue to the next customer. Keep source/image/SMTP uncertainty local to that task. Never blindly repeat unknown image calls or SMTP submissions; retain opt-outs, refusals and sender separation. SMTP acceptance is not proof of receipt.
 
-## Start with the user's existing authorization and state
+## Read only when needed
 
-1. Locate the explicitly supplied workspace/config. Do not guess Desktop paths or overwrite an existing project. Keep separate sender profiles and preserve existing databases, held jobs, logs, replies, opt-outs and uncertain submissions.
-2. Run `python3 -m packaging_outreach --config CONFIG status` and `doctor`. Report actual missing API capabilities or configuration. Never print, copy into files, or commit API/email passwords; use the configured environment variable names.
-3. Use existing setup and authorization. Do not introduce per-email approval. Public publication requires an explicit instruction; ordinary outreach authorization does not publish customer records or private packaging references.
-4. Start or pause through the tool. The service process must remain running for continuous work. Do not promise future execution from a chat that has no running service.
-5. Read status/queue metadata first, then only the selected job. Concept images live in the private `image-assets/` directory and are hash-verified on use; never scan or hydrate every historical image to answer progress questions. Keep the runtime workspace outside cloud-synced Desktop/Documents and outside Git. Existing inline images remain compatible; do not repeatedly migrate the whole database on startup or discard audit records to save space.
-6. Give research models only bounded rotating exclusion hints, not the entire customer history. Keep the complete local duplicate/opt-out checks enabled even for domains absent from the prompt. A prompt-size failure before model invocation is not a slow search.
+- Commands, provider configuration or a new sender: [runtime](references/runtime.md). New sender setup needs the specifically authorized mailbox test; normal operation does not repeat setup checks.
+- Product catalogue or message details: [workflow](references/workflow.md).
+- Smaller models and useful sales copy: [economy](references/economy.md).
+- A measured speed bottleneck or another product profile: [products and speed](references/products-and-speed.md).
+- Failure, unknown delivery or an explicitly requested valuable follow-up: [operations](references/operations.md). Inspect the one affected request; do not clear history or restart unrelated tasks.
 
-## Carry out the whole flow
-
-- Research one real, suitable brand using a live web-capable provider; record official company/contact/product URLs, exact published business email, real SKU, count and source facts. Never guess an email, claim purchase intent without evidence, or call product existence a buyer pain.
-- Apply the configured product profile and target. Built-in packaging profiles use product-fit-v1: no mandatory price, currency or USD 50 threshold. Select each option from actual product form, fragility, count, packed pose, retrieval and brand positioning. Carton selections retain the fixed 1,000-piece MOQ; other profiles use their configured business terms.
-- Use the user's private material manifest, actual product reference image and recent structure history. Choose two suitable different openings; A/B may mix rigid and cardstock. Cartons require thin scored paperboard and paper supports. Fold soft textiles compactly while preserving identity. Do not force ribbons, handles or filler. Keep closures, anchors and supports coherent; fit takes priority over novelty. Concepts require physical sample validation.
-- Keep one authentic product-bound A/B image. Use actual reference image inputs. Do not substitute a blank fixture, unrelated image, old customer's image, or text-only imagined product.
-- Write concise factual option-A and option-B value. Let the application insert the single AB image, two correct WhatsApp links, brand signature and opt-out in that order. Never mix sender identities.
-- Validate selected A/B structures, product-specific fit reasons and applicable cardstock MOQ. Price must not override a suitable structure. Preserve image identity, delivery uncertainty and opt-out checks. Use the verified storefront brand, not a different legal company name; absent a verified brand, leave packaging unbranded. Prefer restrained colors, tactile materials, small A/B marks and a short footer without invented slogans.
-- Use automatic staged execution after initial configuration. Preserve pipeline concurrency and caches. Do not add repeated subjective image scoring or automatic redraw loops.
-- Use `metrics` to measure from discovery through SMTP acceptance, including queue time. Keep exported emails separate from real sends; 300 seconds is a target, not evidence of achieved speed or a cancellation limit. Shared discovery and provider concurrency apply only within one workspace.
-- Before enabling a new sender, run the specifically requested own-account text/image mailbox test. Require SMTP final acceptance and IMAP MIME image hash match. If the test is waiting for receipt, use `verify-mailbox-test`; do not send another test automatically.
-
-## Report and recover accurately
-
-Read actual job/attempt records. Distinguish prepared/spooled, SMTP accepted, actual IMAP receipt, replies, and unknown. A reachable UI or an online service is not a sent email.
-
-Keep request IDs and Message-IDs automatic. Let completed API checkpoints resume without a new call. If an API call or SMTP DATA outcome is unknown, retain the uncertainty and continue other customers; do not delete records or retry blindly. Read [operations.md](references/operations.md) before recovery or new follow-ups.
-
-When the user explicitly requests a new valuable follow-up, locate the accepted same-brand attempt internally and use the follow-up command with the new concrete value. Do not require a manual customer-ID spreadsheet. Ordinary prior Sent is not a permanent ban on such follow-ups; opt-outs, explicit refusals and unresolved unknown still matter.
-
-## Portable handoff
-
-Give another agent the GitHub URL, this Skill, and the local config path. The receiving agent uses the same CLI/JSON protocol. It must supply actual research, vision and reference-image-generation capabilities; an ordinary text-only API cannot perform them by declaration. Keep private business preferences outside the public repository.
+Continuous operation requires the running service. Use recorded stage timings; five minutes is a target, not a claimed result or a cancellation timer. Keep secrets, customer data and private material files outside Git; publish code only when authorized. Concepts require sample validation, never claim engineering approval.

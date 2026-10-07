@@ -22,3 +22,21 @@ class ContextTests(unittest.TestCase):
                 engine.process(jid)
             self.assertIsNone(engine.store.get(jid)['payload']['new_job_id'])
             self.assertEqual(len(engine.store.status()['jobs']),2)
+
+    def test_status_and_discovery_only_return_bounded_metadata(self):
+        from packaging_outreach.store import Store
+        from packaging_outreach.sources import grounded_facts
+        with tempfile.TemporaryDirectory() as d:
+            store=Store(d)
+            with store.db() as c:
+                for i in range(300):
+                    c.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,0)',(str(i),'brand-a','company-%03d.example'%i,'sales@company-%03d.example'%i,'done','done','{}',i))
+            info=store.discovery_context(2)
+            self.assertLessEqual(len(info['excluded_company_domains']),160)
+            hidden=next('company-%03d.example'%i for i in range(300) if 'company-%03d.example'%i not in info['excluded_company_domains'])
+            self.assertTrue(store.discovery_known(hidden,'unknown@example.test'))
+            first=store.status();second=store.status(offset=25)
+            self.assertEqual(first['counts']['jobs'],300);self.assertEqual(len(first['jobs']),25)
+            self.assertFalse({j['id'] for j in first['jobs']} & {j['id'] for j in second['jobs']})
+            self.assertNotIn('payload',first['jobs'][0])
+        self.assertEqual(grounded_facts({'product_facts':['Soap bar','They need packaging urgently']},'Soap bar'),['Soap bar'])
