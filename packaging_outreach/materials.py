@@ -1,7 +1,7 @@
 """Generic structure vocabulary; user's PDF images stay in a private manifest."""
 import hashlib,json
 from pathlib import Path
-BOXES={
+RIGID_BOXES={
  'lid-base':'Separate lift-off lid and base',
  'drawer':'Sliding tray partly retained on the sleeve axis',
  'hinged':'Hinged rigid box with a physical closure',
@@ -10,7 +10,14 @@ BOXES={
  'double-door':'Two hinged doors around one central product support',
  'shoulder':'Lid and base around a visible shoulder',
  'shaped':'Product-appropriate shaped rigid box with a specified opening'}
+FOLDING_CARTONS={
+ 'folding-ste':'Straight-tuck-end folding paperboard carton',
+ 'folding-rte':'Reverse-tuck-end folding paperboard carton',
+ 'folding-auto-lock':'Auto-lock-bottom folding paperboard carton with tuck top',
+ 'folding-sleeve':'Folding-paperboard sleeve with a lightweight sliding carton tray'}
+BOXES=dict(RIGID_BOXES,**FOLDING_CARTONS)
 INSERTS=['folded-card','corrugated','pearl-foam','sponge','black-eva','white-eva','clear-thermoform','flocked-thermoform']
+FOLDING_CARTON_SUPPORTS=['folded-card','corrugated']
 ACCESSORIES=['grosgrain-ribbon','satin-ribbon','two-tone-ribbon','printed-ribbon','handle-cord','wrapping-tissue','decorative-filler']
 
 def context(store,profile=None):

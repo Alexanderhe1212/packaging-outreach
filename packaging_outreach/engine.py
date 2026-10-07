@@ -57,7 +57,7 @@ class Engine:
         product=collected[candidate['product_evidence_url']];image=candidate['product_image_url'];count=candidate['unit_count'];quote=candidate['count_evidence_quote']
         if image not in product.get('images',[]) and image not in product['text']:raise ValueError('Product image URL not bound to source page')
         if type(count) is not int or not 1<=count<=50 or not quote or sources.normalize(quote) not in sources.normalize(product['text']):raise ValueError('Product quantity needs source evidence')
-        p=result['payload'];p.update(company=result['company'],recipient=result['recipient'],product_reference={'url':image,'source_url':p['product_evidence_url'],'unit_count':count,'count_evidence_quote':quote},source_mode=self.config.get('source_mode','direct_https'),seller_profile=profile)
+        p=result['payload'];profiles.apply_price_tier(p,profile);p.update(company=result['company'],recipient=result['recipient'],product_reference={'url':image,'source_url':p['product_evidence_url'],'unit_count':count,'count_evidence_quote':quote},source_mode=self.config.get('source_mode','direct_https'),seller_profile=profile)
         p['workflow_mode']=self.config.get('workflow',{}).get('mode','balanced')
         return p
     def process(self,jid):
@@ -83,7 +83,9 @@ class Engine:
                 self.store.advance(jid,'done',{'candidate_found':bool(candidate),'new_job_id':added},'done');return
             if stage=='concept':
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference']}
-                profile=p.get('seller_profile') or profiles.resolve(self.config,brand);public['seller_profile']={k:profile[k] for k in ('id','name','offer','design_rules','validation_note')};p['seller_profile']=profile
+                base_profile=p.get('seller_profile') or profiles.resolve(self.config,brand);profile=profiles.for_payload(base_profile,p);public['seller_profile']=profiles.public(profile);p['seller_profile']=profile
+                for key in ('retail_price','packaging_tier','minimum_order_quantity','price_rule_version'):
+                    if key in p:public[key]=p[key]
                 economy=p.get('workflow_mode')=='economy'
                 brief=sales.brief(p,profile,brand) if economy else public
                 # Product download has no dependency on the plan call.
@@ -105,10 +107,11 @@ class Engine:
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference','plan']}
                 public['sender']={'name':brand['name'],'signature':brand['signature']}
                 profile=p.get('seller_profile') or profiles.resolve(self.config,brand)
-                public['seller_profile']={k:profile[k] for k in ('id','name','offer','design_rules','validation_note')}
+                public['seller_profile']=profiles.public(profile)
                 draft=self.api(job,'draft',prompts.DRAFT_PROFILE,public,[self.reference(p),(base64.b64decode(p['concept_png']),'image/png')])
                 if not draft.get('subject') or len(draft['subject'])>150 or not draft.get('body') or len(draft['body'])>2400:raise ValueError('Concise subject and body required')
                 if not all(draft.get('identity',{}).get(k) is True for k in ['correct_product','correct_count','usable_image']):raise ValueError('Factual product identity unresolved')
+                draft['body']=sales.add_packaging_terms(draft['body'],p)
                 p['draft']=draft;self.store.advance(jid,'send',p);return
             if stage=='send':
                 result=mail.send(self.store,self.config,brand,job);p['delivery']=result
