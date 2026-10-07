@@ -6,7 +6,7 @@ REPLY_QUESTION = 'Would you like a short materials and structure breakdown for A
 PACKAGING_REPLY_QUESTION = 'Would you like a short materials and insert breakdown for A or B? Just reply A or B.'
 
 
-CARDSTOCK_MOQ = 'For these cardstock concepts, production starts at 1,000 pieces.'
+CARDSTOCK_MOQ = 'For any selected cardstock option, production starts at 1,000 pieces.'
 
 
 def brief(payload, profile, brand):
@@ -16,6 +16,7 @@ def brief(payload, profile, brand):
         raise ValueError('services must map IDs to short, factual seller statements')
     result = {
         'company': payload['company'],
+        'customer_brand': payload.get('brand_marker'),
         'facts': payload['facts'][:6],
         'product_reference': {'unit_count': payload['product_reference']['unit_count']},
         'seller_profile': {k:profile[k] for k in ('id','name','offer','design_rules','validation_note')},
@@ -45,7 +46,7 @@ def compose(slots, data):
     service_id=slots.get('service_id')
     if service_id not in data['services']:raise ValueError('Unknown seller service; do not invent capabilities')
     paragraphs=[slots['opening'].strip(),'A — '+slots['a_value'].strip(), 'B — '+slots['b_value'].strip()]
-    if data.get('packaging_tier')=='folding_carton':
+    if data.get('packaging_tier') in ('folding_carton','mixed'):
         if data.get('minimum_order_quantity')!=1000:raise ValueError('Cardstock MOQ must be 1000')
         paragraphs.append(CARDSTOCK_MOQ)
     paragraphs.extend([data['services'][service_id],data['seller_profile']['validation_note'],data.get('reply_question',REPLY_QUESTION)])
@@ -58,7 +59,7 @@ def compose(slots, data):
 
 def add_packaging_terms(body, payload):
     """Insert the fixed MOQ outside model-generated copy."""
-    if payload.get('packaging_tier')!='folding_carton':return body
+    if payload.get('packaging_tier') not in ('folding_carton','mixed'):return body
     if payload.get('minimum_order_quantity')!=1000:raise ValueError('Cardstock MOQ must be 1000')
     if re.search(r'(?i)\bMOQ\b|minimum order',body):raise ValueError('Model-generated MOQ text is not allowed')
     parts=body.split('\n\n')

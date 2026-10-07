@@ -108,7 +108,7 @@ def verify_candidate(x,request,fetcher,allow_browser=False):
         validated_price=None
     else:
         validated_price=verify_price(price,x,product,policy)
-    payload=dict(company_url=x['company_url'],email_source_url=contact['url'],checked_at=contact['checked_at'],facts=facts,product_facts=facts,public_emails=[recipient],email_evidence=[{'email':recipient,'source_url':contact['url'],'role':'published_business_contact; purchasing_authority_not_established'}],product_evidence_url=product['url'],retail_price=validated_price,purchase_intent='not_established',purchasing_authority='not_established',engineering_approved=False,source_origin=('official_subscription_public_browser' if allow_browser else 'direct_public_official_fetch'),source_evidence=[{k:p[k] for k in ('url','sha256','checked_at')} for p in pages.values()],inferences=[])
+    payload=dict(brand_marker=x['brand_marker'] if normalize(x['brand_marker']) in normalize(home['text']) else None,company_url=x['company_url'],email_source_url=contact['url'],checked_at=contact['checked_at'],facts=facts,product_facts=facts,public_emails=[recipient],email_evidence=[{'email':recipient,'source_url':contact['url'],'role':'published_business_contact; purchasing_authority_not_established'}],product_evidence_url=product['url'],retail_price=validated_price,purchase_intent='not_established',purchasing_authority='not_established',engineering_approved=False,source_origin=('official_subscription_public_browser' if allow_browser else 'direct_public_official_fetch'),source_evidence=[{k:p[k] for k in ('url','sha256','checked_at')} for p in pages.values()],inferences=[])
     return {'company':company,'recipient':recipient,'payload':payload}
 
 def verify_price(price,x,product,policy):

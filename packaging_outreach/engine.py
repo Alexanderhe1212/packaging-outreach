@@ -57,7 +57,7 @@ class Engine:
         product=collected[candidate['product_evidence_url']];image=candidate['product_image_url'];count=candidate['unit_count'];quote=candidate['count_evidence_quote']
         if image not in product.get('images',[]) and image not in product['text']:raise ValueError('Product image URL not bound to source page')
         if type(count) is not int or not 1<=count<=50 or not quote or sources.normalize(quote) not in sources.normalize(product['text']):raise ValueError('Product quantity needs source evidence')
-        p=result['payload'];profiles.apply_price_tier(p,profile);p.update(company=result['company'],recipient=result['recipient'],product_reference={'url':image,'source_url':p['product_evidence_url'],'unit_count':count,'count_evidence_quote':quote},source_mode=self.config.get('source_mode','direct_https'),seller_profile=profile)
+        p=result['payload'];profiles.apply_product_fit(p,profile);p.update(company=result['company'],recipient=result['recipient'],product_reference={'url':image,'source_url':p['product_evidence_url'],'unit_count':count,'count_evidence_quote':quote},source_mode=self.config.get('source_mode','direct_https'),seller_profile=profile)
         p['workflow_mode']=self.config.get('workflow',{}).get('mode','balanced')
         return p
     def process(self,jid):
@@ -85,16 +85,16 @@ class Engine:
                 self.store.advance(jid,'done',{'candidate_found':bool(candidate),'new_job_id':added},'done');return
             if stage=='concept':
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference']}
+                public['customer_brand']=p.get('brand_marker')
                 base_profile=p.get('seller_profile') or profiles.resolve(self.config,brand);profile=profiles.for_payload(base_profile,p);public['seller_profile']=profiles.public(profile);p['seller_profile']=profile
-                for key in ('retail_price','packaging_tier','minimum_order_quantity','price_rule_version'):
-                    if key in p:public[key]=p[key]
                 economy=p.get('workflow_mode')=='economy'
                 brief=sales.brief(p,profile,brand) if economy else public
-                # Product download has no dependency on the plan call.
+                # Reuse one download in the existing visual plan call and image generation.
                 with ThreadPoolExecutor(max_workers=2) as prep:
                     reference=prep.submit(self.reference,p)
-                    answer=self.api(job,'plan',prompts.PLAN_EMAIL if economy else prompts.PLAN_PROFILE,dict(brief,catalog=materials.context(self.store,profile)))
+                    answer=self.api(job,'plan',prompts.PLAN_EMAIL if economy else prompts.PLAN_PROFILE,dict(brief,catalog=materials.context(self.store,profile)),[reference.result()])
                     plan=profiles.normalize_plan(answer,profile)
+                    fit=profiles.bind_plan(p,plan,profile);public.update(fit);brief.update(fit)
                     if economy:p['prepared_email']=sales.compose(answer['email'],brief)
                     refs=[reference.result()]+materials.selected_images(plan,profile.get('material_manifest',self.config.get('material_manifest')))
                 image=self.api(job,'image',prompts.IMAGE_PROFILE,dict(public,plan=plan),refs)
@@ -103,7 +103,7 @@ class Engine:
                 self.store.advance(jid,'draft',p);return
             if stage=='draft':
                 if p.get('prepared_email'):
-                    identity=self.api(job,'identity',prompts.IDENTITY,{'facts':p['facts'][:6],'unit_count':p['product_reference']['unit_count']},[self.reference(p),(base64.b64decode(p['concept_png']),'image/png')])
+                    identity=self.api(job,'identity',prompts.IDENTITY,{'customer_brand':p.get('brand_marker'),'facts':p['facts'][:6],'unit_count':p['product_reference']['unit_count']},[self.reference(p),(base64.b64decode(p['concept_png']),'image/png')])
                     if not all(identity.get(k) is True for k in ['correct_product','correct_count','usable_image']):raise ValueError('Factual product identity unresolved')
                     p['draft']=dict(p['prepared_email'],identity=identity);self.store.advance(jid,'send',p);return
                 public={k:p[k] for k in ['company','facts','product_evidence_url','product_reference','plan']}

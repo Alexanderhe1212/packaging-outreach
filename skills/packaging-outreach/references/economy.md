@@ -1,6 +1,6 @@
 # Smaller models and useful outreach
 
-Recommend workflow.mode=economy when the user wants low-cost text models. A small text-only model returns the A/B plan and short grounded email slots in one call. The program builds the body from those slots, user-provided service statements, sampling note and one A/B reply question. A separate vision provider returns only correct_product, correct_count and usable_image after generation. Do not infer true or retry blindly on invalid results.
+Recommend workflow.mode=economy when the user wants low-cost models. A small image-capable planning model returns the A/B plan and short grounded email slots in one call with the actual product reference. Set providers.plan to an image-capable endpoint if the default text endpoint cannot accept images. The program builds the body from those slots, user-provided service statements, sampling note and one A/B reply question. A separate vision provider returns only correct_product, correct_count and usable_image after generation. Do not infer true or retry blindly on invalid results.
 
 Use the repository's examples/economy.json. Configure api.research_model and api.vision_model or providers overrides. Ordinary chat does not perform web search or reference-image generation. json_mode=prompt omits the JSON-mode parameter for older Chat-compatible APIs; token_limit_parameter=max_tokens supports the legacy field. Preserve image inputs and respect explicit vision=false. Never auto-upgrade to a paid stronger model.
 

@@ -19,7 +19,7 @@ def doctor(c):
     for b in c['brands']:
         if c.get('auto_send') and not os.environ.get(b['password_env']):issues.append('Missing '+b['password_env'])
     return {'ready':not issues,'issues':issues,'mode':'automatic_send' if c.get('auto_send') else 'prepare_and_export','workflow_mode':mode,
-      'capabilities':{'research':'live search provider or agent','planning':'text-only model','visual_identity':'vision-capable model','concept':'reference-image generation'},'compatibility_verified':'local configuration only; actual API response required'}
+      'capabilities':{'research':'live search provider or agent','planning':'image-capable model with product reference','visual_identity':'vision-capable model','concept':'reference-image generation'},'compatibility_verified':'local configuration only; actual API response required'}
 
 def main(argv=None):
     p=argparse.ArgumentParser(prog='packaging-outreach');p.add_argument('--config',default='outreach.json')

@@ -49,7 +49,7 @@ class PriceTierTests(unittest.TestCase):
         engine.store.setting('paused','false');engine.store.add('brand-a',{})
         return engine
 
-    def test_below_50_uses_only_cardstock_and_inserts_fixed_1000_moq(self):
+    def test_selected_cardstock_inserts_fixed_1000_moq(self):
         with tempfile.TemporaryDirectory() as directory:
             engine=self.engine(directory,LowPriceProvider());engine.run(until_idle=True)
             job=next(engine.store.get(x['id']) for x in engine.store.status()['jobs'] if x['company_key'])
@@ -65,24 +65,51 @@ class PriceTierTests(unittest.TestCase):
             tampered=dict(job['payload'],minimum_order_quantity=500)
             with self.assertRaises(ValueError):profiles.validate_price_tier_payload(tampered)
 
-    def test_low_price_rigid_plan_is_blocked_before_image(self):
+    def test_low_price_rigid_plan_completes(self):
         with tempfile.TemporaryDirectory() as directory:
             provider=LowPriceProvider(wrong_tier=True);engine=self.engine(directory,provider)
             engine.run(until_idle=True)
             job=next(engine.store.get(x['id']) for x in engine.store.status()['jobs'] if x['company_key'])
-            self.assertEqual(job['state'],'blocked')
-            self.assertNotIn('image',[stage for stage,_ in provider.calls])
-            self.assertFalse((Path(directory)/'outbox').exists())
+            self.assertEqual(job['state'],'done')
+            self.assertEqual(job['payload']['packaging_tier'],'rigid_box')
+            self.assertIn('image',[stage for stage,_ in provider.calls])
+            self.assertEqual(len(list((Path(directory)/'outbox').glob('*.eml'))),1)
 
-    def test_exactly_50_uses_rigid_tier(self):
+    def test_price_does_not_restrict_catalogue(self):
         with tempfile.TemporaryDirectory() as directory:
             provider=FakeProvider();candidate=provider.call('research','',{},'r')['candidate']
             candidate['retail_price'].update(amount=50,source_quote='USD 50')
             engine=self.engine(directory,provider,amount=50)
             payload=engine.verify(candidate,[])
-            self.assertEqual(payload['packaging_tier'],'rigid_box')
+            self.assertNotIn('packaging_tier',payload)
+            profile=profiles.for_payload(profiles.resolve(engine.config),payload)
+            self.assertIn('folding-ste',profile['structures']);self.assertIn('hinged',profile['structures'])
             self.assertNotIn('minimum_order_quantity',payload)
 
 
 if __name__=='__main__':
     unittest.main()
+
+    def test_mixed_plan_with_no_price_has_option_scoped_moq(self):
+        profile=profiles.resolve({'product_profile':'paper-packaging'})
+        plan={'a':{'structure':'folding-ste','support':'folded-card','accessories':[],
+                'description':'Compact paper carton','fit_reason':'Paper cradle holds the single bottle'},
+              'b':{'structure':'hinged','support':'black-eva','accessories':[],
+                'description':'Hinged presentation box','fit_reason':'Fitted cavity supports the fragile bottle'}}
+        plan=profiles.normalize_plan(plan,profile)
+        payload={'seller_profile':profile,'plan':plan,'retail_price':None}
+        profiles.bind_plan(payload,plan,profile)
+        self.assertEqual(payload['packaging_tier'],'mixed')
+        self.assertEqual(payload['cardstock_options'],['a'])
+        from packaging_outreach import sales
+        payload['draft']={'body':sales.add_packaging_terms('A paper option. B rigid option.',payload)}
+        self.assertIn('For any selected cardstock option',payload['draft']['body'])
+        profiles.validate_product_fit_payload(payload)
+        plan['a']['support']='black-eva'
+        with self.assertRaises(ValueError):profiles.normalize_plan(plan,profile)
+
+    def test_missing_fit_reason_is_not_a_complete_plan(self):
+        profile=profiles.resolve({})
+        plan=FakeProvider().call('plan','',{},'r')
+        plan['a']['fit_reason']=''
+        with self.assertRaises(ValueError):profiles.normalize_plan(plan,profile)

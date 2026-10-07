@@ -35,7 +35,7 @@ def sync(store,brand,recipient=None):
     return result
 
 def send(store,config,brand,job):
-    payload=job['payload'];profiles.validate_price_tier_payload(payload);mid=payload.setdefault('message_id','<'+uuid.uuid4().hex+'@'+brand['sender'].split('@')[1]+'>')
+    payload=job['payload'];profiles.validate_product_fit_payload(payload);mid=payload.setdefault('message_id','<'+uuid.uuid4().hex+'@'+brand['sender'].split('@')[1]+'>')
     raw=render(brand,payload,mid).as_bytes();sha=hashlib.sha256(raw).hexdigest()
     directory=store.root/'outbox';directory.mkdir(exist_ok=True)
     path=directory/(job['id']+'.eml');path.write_bytes(raw)

@@ -8,11 +8,11 @@ PACKAGING = {
     'target': 'Premium fragrance, jewelry and suitable consumer gift brands in developed markets.',
     'design_rules': 'Two different opening structures, coherent closures and fitted product support. '
         'Premium finishes, brand-informed colors. Ribbon anchors must clear cavities and closing paths. '
-        'Do not force handles or filler. Filler is not sole bottle support. Tissue means wrapping tissue.',
+        'Do not force handles or filler. Filler is not sole bottle support. Tissue means wrapping tissue. Choose rigid or carton construction independently for each option from product form, fragility, count, retrieval, packed pose and brand positioning; never from retail price. Folding cartons use folded-card or corrugated support only. Fold soft textiles compactly while preserving pattern, material, fringe and count. Avoid oversized empty boxes and tissue bolsters. Use restrained brand colors, tactile paper and at most two appropriate finishes. Product fit takes priority over novelty.',
     'validation_note': 'Dimensions, fit and closure require sample validation.',
-    'price_policy': {'required': True, 'minimum': 0, 'currencies': ['USD']},
-    'price_tier_policy': {
-        'version': 'usd50-v1', 'threshold_usd': 50,
+    'price_policy': {'required': False},
+    'product_fit_policy': {
+        'version': 'product-fit-v1',
         'folding_carton_moq': 1000,
         'folding_carton_structures': list(materials.FOLDING_CARTONS),
         'rigid_box_structures': list(materials.RIGID_BOXES),
@@ -30,7 +30,7 @@ PAPER_PACKAGING.update(id='paper-packaging', name='Custom paper and gift packagi
         'gifts, stationery, wellness outer packaging, design agencies, print resellers and publicly operating artisans. '
         'Use published business contacts and actual products. No minimum retail price or business size. '
         'Do not infer purchase intent, MOQ, food-contact or medical certification.',
-    price_policy={'required':True,'minimum':0,'currencies':['USD']})
+    price_policy={'required':False})
 
 
 def resolve(config, brand=None):
@@ -63,89 +63,62 @@ def resolve(config, brand=None):
         raise ValueError('Price minimum must be a finite nonnegative number')
     if policy.get('required') and not policy.get('currencies'):
         raise ValueError('Required price needs accepted currencies')
-    tier = result.get('price_tier_policy')
-    if tier:
-        if (tier.get('version') != 'usd50-v1' or tier.get('threshold_usd') != 50 or
-                tier.get('folding_carton_moq') != 1000):
-            raise ValueError('Built-in packaging price tier must be USD 50 / MOQ 1000')
-        folding=set(tier.get('folding_carton_structures',[]));rigid=set(tier.get('rigid_box_structures',[]))
-        if (not folding or not rigid or folding & rigid or
-                not (folding|rigid) <= set(result['structures']) or
-                not set(tier.get('folding_carton_supports',[])) <= set(result['supports'])):
-            raise ValueError('Packaging tier catalogue is incomplete')
-        if policy.get('required') is not True or policy.get('minimum') != 0 or policy.get('currencies') != ['USD']:
-            raise ValueError('Packaging tier requires an exact official USD price without a minimum')
     return result
 
 
-def apply_price_tier(payload, profile):
-    """Bind the verified exact-SKU USD price to a deterministic box tier."""
-    rule=profile.get('price_tier_policy')
-    if not rule:return payload
-    price=payload.get('retail_price',{})
-    amount=price.get('amount') if isinstance(price,dict) else None
-    if type(amount) not in (int,float) or isinstance(amount,bool) or not 0<=amount<float('inf') or price.get('currency')!='USD':
-        raise ValueError('Packaging tier requires an exact official USD product price')
-    low=amount<rule['threshold_usd']
-    payload['packaging_tier']='folding_carton' if low else 'rigid_box'
-    payload['price_rule_version']=rule['version']
-    payload['price_tier_rule']={
-        'threshold_usd':rule['threshold_usd'],
-        'folding_carton_moq':rule['folding_carton_moq'],
-    }
-    if low:payload['minimum_order_quantity']=rule['folding_carton_moq']
-    else:payload.pop('minimum_order_quantity',None)
+def apply_product_fit(payload, profile):
+    """The catalogue stays available without a required price or currency."""
+    if profile.get('product_fit_policy'):
+        payload['packaging_rule_version']='product-fit-v1'
     return payload
+
+# Backward-compatible callable; the USD50 policy has been retired.
+apply_price_tier = apply_product_fit
 
 
 def for_payload(profile, payload):
-    """Expose only structures/supports allowed for this verified price tier."""
-    output=copy.deepcopy(profile);rule=output.get('price_tier_policy')
-    if not rule:return output
-    tier=payload.get('packaging_tier')
-    if tier=='folding_carton':
-        allowed=set(rule['folding_carton_structures'])
-        output['supports']=[x for x in output['supports'] if x in rule['folding_carton_supports']]
-        output['design_rules']+=' Both A and B must be thin folding cardstock cartons, never rigid greyboard or magnetic boxes.'
-        output['minimum_order_quantity']=rule['folding_carton_moq']
-    elif tier=='rigid_box':
-        allowed=set(rule['rigid_box_structures'])
-        output['design_rules']+=' Both A and B must be rigid presentation boxes, not lightweight folding cartons.'
-    else:raise ValueError('Verified packaging tier missing')
-    output['structures']={k:v for k,v in output['structures'].items() if k in allowed}
-    output['packaging_tier']=tier;output['price_rule_version']=rule['version']
+    output=copy.deepcopy(profile)
+    if output.get('id') in ('paper-packaging','premium-packaging'):
+        # Resume persisted built-in profiles using the current catalogue, not old tier filters.
+        current=copy.deepcopy(PAPER_PACKAGING if output['id']=='paper-packaging' else PACKAGING)
+        if output.get('material_manifest'):current['material_manifest']=output['material_manifest']
+        output=current
     return output
 
 
+def bind_plan(payload, plan, profile):
+    if not profile.get('product_fit_policy'):return {}
+    types={k:'folding_carton' if plan[k]['structure'] in materials.FOLDING_CARTONS else 'rigid_box' for k in ('a','b')}
+    fields={'packaging_rule_version':'product-fit-v1','option_packaging_types':types,
+        'packaging_tier':types['a'] if types['a']==types['b'] else 'mixed'}
+    cartons=[k for k in ('a','b') if types[k]=='folding_carton']
+    if cartons:fields.update(minimum_order_quantity=1000,cardstock_options=cartons)
+    else:payload.pop('minimum_order_quantity',None);payload.pop('cardstock_options',None)
+    payload.update(fields)
+    return fields
+
+
 def public(profile):
-    fields=('id','name','offer','design_rules','validation_note','packaging_tier','minimum_order_quantity','price_rule_version')
+    fields=('id','name','offer','design_rules','validation_note','product_fit_policy')
     return {k:profile[k] for k in fields if k in profile}
 
 
-def validate_price_tier_payload(payload):
-    """Final hard gate: stale or mismatched price-tier drafts cannot be sent."""
-    profile=payload.get('seller_profile',{});rule=profile.get('price_tier_policy')
-    if not rule:
-        if profile.get('id') in ('paper-packaging','premium-packaging'):
-            raise ValueError('Packaging draft predates the required USD 50 tier rule')
-        return
-    price=payload.get('retail_price',{});amount=price.get('amount') if isinstance(price,dict) else None
-    if (type(amount) not in (int,float) or isinstance(amount,bool) or price.get('currency')!='USD' or
-            not price.get('checked_at') or price.get('product_url')!=payload.get('product_evidence_url') or
-            not price.get('source_quote')):
-        raise ValueError('Send blocked: exact official USD price evidence is missing')
-    expected='folding_carton' if amount<rule['threshold_usd'] else 'rigid_box'
-    if payload.get('packaging_tier')!=expected or payload.get('price_rule_version')!=rule['version']:
-        raise ValueError('Send blocked: product price and packaging tier do not match')
-    plans=payload.get('plan',{});structures=[plans.get(k,{}).get('structure') for k in ('a','b')]
-    allowed=rule['folding_carton_structures'] if expected=='folding_carton' else rule['rigid_box_structures']
-    if len(set(structures))!=2 or any(x not in allowed for x in structures):
-        raise ValueError('Send blocked: A/B structures do not match the price tier')
-    if expected=='folding_carton':
-        if payload.get('minimum_order_quantity')!=rule['folding_carton_moq']:
-            raise ValueError('Send blocked: cardstock MOQ must be 1000')
+def validate_product_fit_payload(payload):
+    profile=payload.get('seller_profile',{})
+    if profile.get('id') not in ('paper-packaging','premium-packaging') and not profile.get('product_fit_policy'):return
+    current=for_payload(profile,payload)
+    plan=normalize_plan(payload.get('plan',{}),current)
+    derived=bind_plan({},plan,current)
+    if payload.get('packaging_tier')!=derived['packaging_tier']:
+        raise ValueError('Construction does not match the selected A/B structures')
+    if payload.get('packaging_rule_version')=='product-fit-v1' and payload.get('option_packaging_types')!=derived['option_packaging_types']:
+        raise ValueError('Per-option construction differs from the plan')
+    if derived.get('cardstock_options'):
+        if payload.get('minimum_order_quantity')!=1000:raise ValueError('Cardstock MOQ must be 1000')
         if 'production starts at 1,000 pieces' not in payload.get('draft',{}).get('body',''):
-            raise ValueError('Send blocked: cardstock MOQ is missing from the email')
+            raise ValueError('Cardstock MOQ is missing from the email')
+
+validate_price_tier_payload = validate_product_fit_payload
 
 
 def normalize_plan(plan, profile):
@@ -161,6 +134,8 @@ def normalize_plan(plan, profile):
                 not isinstance(accessories, list) or len(accessories) > 2 or
                 any(x not in profile['accessories'] for x in accessories)):
             raise ValueError('Unknown product-profile material selection')
+        if profile.get('product_fit_policy') and option['structure'] in materials.FOLDING_CARTONS and option['support'] not in materials.FOLDING_CARTON_SUPPORTS:
+            raise ValueError('Folding cartons require paper support')
         if not option.get('description') or not option.get('fit_reason'):
             raise ValueError('Each option needs a description and product-specific fit reason')
         option['accessories'] = accessories

@@ -39,18 +39,27 @@ class SpeedAndProfileTests(unittest.TestCase):
             self.assertEqual(e.status()['performance']['brands']['brand-a']['accepted_end_to_end']['count'],0)
             self.assertEqual(len(list((Path(d)/'outbox').glob('*.eml'))),1)
 
-    def test_broad_packaging_requires_exact_usd_price_without_inventing_intent(self):
+    def test_broad_packaging_accepts_no_price_without_inventing_intent(self):
         with tempfile.TemporaryDirectory() as d:
             c=example();c.update(workspace=d,product_profile='paper-packaging');e=Engine(c,FakeProvider(),fetch)
             candidate=FakeProvider().call('research','',{},'r')['candidate'];candidate['retail_price']=None
-            with self.assertRaises(ValueError):e.verify(candidate,[])
-            self.assertEqual(profiles.resolve(c)['price_policy'],{'required':True,'minimum':0,'currencies':['USD']})
+            self.assertIsNone(e.verify(candidate,[])['retail_price'])
+            self.assertEqual(profiles.resolve(c)['price_policy'],{'required':False})
 
-    def test_packaging_price_filter_is_unchanged(self):
+    def test_premium_packaging_accepts_no_price(self):
         with tempfile.TemporaryDirectory() as d:
             c=example();c.update(workspace=d,product_profile='premium-packaging');e=Engine(c,FakeProvider(),fetch)
             candidate=FakeProvider().call('research','',{},'r')['candidate'];candidate['retail_price']=None
-            with self.assertRaises(ValueError):e.verify(candidate,[])
+            self.assertIsNone(e.verify(candidate,[])['retail_price'])
+
+    def test_verified_storefront_brand_survives_different_legal_company_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            c=example();c['workspace']=d;e=Engine(c,FakeProvider(),fetch)
+            candidate=FakeProvider().call('research','',{},'r')['candidate']
+            candidate['company']='Different Legal Entity LLC';candidate['retail_price']=None
+            payload=e.verify(candidate,[])
+            self.assertEqual(payload['brand_marker'],'Fixture Fragrance')
+            self.assertEqual(payload['company'],'Different Legal Entity LLC')
 
     def test_cache_single_fetch_for_concurrent_accounts_and_expiry(self):
         with tempfile.TemporaryDirectory() as d:
@@ -101,18 +110,20 @@ class SpeedAndProfileTests(unittest.TestCase):
                 list(pool.map(lambda i:e.api({'id':str(i)},'image','',{}),range(4)))
             self.assertEqual(peak,1)
 
-    def test_reference_download_overlaps_plan(self):
+    def test_existing_plan_call_sees_actual_product_reference(self):
         with tempfile.TemporaryDirectory() as d:
             c=example();c['workspace']=d;p=FakeProvider();e=Engine(c,p,fetch)
-            started=threading.Event();proceed=threading.Event();original=p.call
-            def reference(payload):started.set();self.assertTrue(proceed.wait(2));return png(),'image/png'
-            def call(stage,*args):
-                if stage=='plan':self.assertTrue(started.wait(2));proceed.set()
-                return original(stage,*args)
+            calls=[];original=p.call
+            def reference(payload):calls.append('reference');return png(),'image/png'
+            def call(stage,prompt,data,rid,images=()):
+                if stage=='plan':
+                    self.assertEqual(calls,['reference']);self.assertEqual(images,[(png(),'image/png')])
+                return original(stage,prompt,data,rid,images)
             e.reference=reference;p.call=call
             payload=e.verify(p.call('research','',{},'r')['candidate'],[])
             jid=e.store.add('brand-a',payload,'concept');e.store.setting('paused','false');e.process(jid)
             self.assertEqual(e.store.get(jid)['stage'],'draft')
+            self.assertEqual(calls,['reference'])
 
     def test_end_to_end_includes_research_and_queue_and_never_counts_export_as_send(self):
         with tempfile.TemporaryDirectory() as d:

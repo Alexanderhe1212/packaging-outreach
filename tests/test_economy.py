@@ -34,13 +34,13 @@ class EconomyTests(unittest.TestCase):
         c=example();c.update(workspace=d,auto_discover=False,workflow={'mode':'economy'})
         p=EconomyProvider();e=Engine(c,p,fetch);e.reference=lambda _:(png(),'image/png');e.store.setting('paused','false');e.store.add('brand-a',{});return e,p
 
-    def test_text_only_plan_email_and_short_separate_identity_resume_to_mime(self):
+    def test_visual_plan_email_and_short_identity_resume_to_mime(self):
         with tempfile.TemporaryDirectory() as d:
             e,p=self.engine(d)
             with patch('packaging_outreach.transport.send_once') as smtp:
                 e.run(until_idle=True);e.run(until_idle=True);smtp.assert_not_called()
             self.assertEqual([x[0] for x in p.calls],['research','plan','image','identity'])
-            self.assertEqual([x for x in p.inputs if x[0]=='plan'][0][2],())
+            self.assertEqual(len([x for x in p.inputs if x[0]=='plan'][0][2]),1)
             self.assertEqual(len([x for x in p.inputs if x[0]=='identity'][0][2]),2)
             job=next(e.store.get(j['id']) for j in e.store.status()['jobs'] if j['company_key'])
             self.assertEqual(job['state'],'done');draft=job['payload']['draft']
