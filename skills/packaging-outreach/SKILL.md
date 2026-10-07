@@ -17,6 +17,7 @@ For smaller/cheaper models or reply-focused outreach, read [economy.md](referenc
 2. Run `python3 -m packaging_outreach --config CONFIG status` and `doctor`. Report actual missing API capabilities or configuration. Never print, copy into files, or commit API/email passwords; use the configured environment variable names.
 3. Use existing setup and authorization. Do not introduce per-email approval. Public publication requires an explicit instruction; ordinary outreach authorization does not publish customer records or private packaging references.
 4. Start or pause through the tool. The service process must remain running for continuous work. Do not promise future execution from a chat that has no running service.
+5. Read status/queue metadata first, then only the selected job. Concept images live in the private `image-assets/` directory and are hash-verified on use; never scan or hydrate every historical image to answer progress questions. Keep the runtime workspace outside cloud-synced Desktop/Documents and outside Git. Existing inline images remain compatible; do not repeatedly migrate the whole database on startup or discard audit records to save space.
 
 ## Carry out the whole flow
 

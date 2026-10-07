@@ -62,8 +62,9 @@ class Engine:
         return p
     def process(self,jid):
         if not self.store.claim(jid):return
-        job=self.store.get(jid);p=job['payload'];brand=self.brands[job['brand']]
+        job=None
         try:
+            job=self.store.get(jid);p=job['payload'];brand=self.brands[job['brand']]
             stage=job['stage']
             if stage=='research':
                 profile=profiles.resolve(self.config,brand)
@@ -120,10 +121,10 @@ class Engine:
         except RetryLater:self.store.fail(jid,'queued','Provider rate limited',60)
         except UncertainCall:
             self.store.fail(jid,'unknown','Remote outcome uncertain; reconcile recorded request ID')
-            if job['stage']=='research':self.store.setting('discovery_next_at',time.time()+60)
+            if job and job['stage']=='research':self.store.setting('discovery_next_at',time.time()+60)
         except Exception as e:
             self.store.fail(jid,'blocked',type(e).__name__+': '+str(e)[:250])
-            if job['stage']=='research':self.store.setting('discovery_next_at',time.time()+60)
+            if job and job['stage']=='research':self.store.setting('discovery_next_at',time.time()+60)
     def run(self,stop=None,until_idle=False):
         owner=uuid.uuid4().hex;self.store.acquire(owner);limits=dict(research=1,concept=2,draft=1,send=1);limits.update(self.config.get('concurrency',{}))
         if any(type(n) is not int or n<1 or n>8 for n in limits.values()):raise ValueError('Concurrency must be 1–8 per stage')

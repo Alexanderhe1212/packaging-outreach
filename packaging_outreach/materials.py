@@ -21,9 +21,8 @@ FOLDING_CARTON_SUPPORTS=['folded-card','corrugated']
 ACCESSORIES=['grosgrain-ribbon','satin-ribbon','two-tone-ribbon','printed-ribbon','handle-cord','wrapping-tissue','decorative-filler']
 
 def context(store,profile=None):
- with store.db() as c:rows=c.execute("SELECT payload FROM jobs WHERE stage IN ('draft','send','done') ORDER BY updated DESC LIMIT 60").fetchall()
- payloads=[json.loads(x[0]) for x in rows]
- recent=[x.get('plan',{}) for x in payloads if not profile or x.get('seller_profile',{}).get('id', 'premium-packaging')==profile['id']][:12]
+ with store.db() as c:rows=c.execute("SELECT profile_id,plan FROM plan_summaries WHERE stage IN ('draft','send','done') ORDER BY updated DESC LIMIT 60").fetchall()
+ recent=[json.loads(x['plan'] or '{}') for x in rows if not profile or x['profile_id']==profile['id']][:12]
  return {'structures':profile['structures'] if profile else BOXES,'supports':profile['supports'] if profile else INSERTS,'accessories':profile['accessories'] if profile else ACCESSORIES,'recent_selections':[{k:r.get(k,{}).get('structure',r.get(k,{}).get('box')) for k in ['a','b']} for r in recent]}
 
 def selected_images(plan,manifest_path):

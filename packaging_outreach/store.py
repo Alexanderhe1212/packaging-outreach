@@ -1,6 +1,7 @@
 """Durable per-stage claims, per-company first contact, and immutable send attempts."""
 import contextlib,json,sqlite3,time,uuid
 from pathlib import Path
+from . import blobs
 
 class Store:
     def __init__(self,root):
@@ -19,6 +20,18 @@ class Store:
             CREATE TABLE IF NOT EXISTS timing(job_id TEXT PRIMARY KEY,created REAL,origin REAL);
             CREATE TABLE IF NOT EXISTS stage_times(id INTEGER PRIMARY KEY,job_id TEXT,stage TEXT,started REAL,ended REAL,outcome TEXT);
             CREATE INDEX IF NOT EXISTS stage_times_job ON stage_times(job_id);
+            CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(state,next_at,updated);
+            CREATE INDEX IF NOT EXISTS jobs_company ON jobs(company_key);
+            CREATE INDEX IF NOT EXISTS attempts_company ON attempts(company_key,result);
+            CREATE TABLE IF NOT EXISTS plan_summaries(job_id TEXT PRIMARY KEY,profile_id TEXT,plan TEXT,stage TEXT,updated REAL);
+            CREATE INDEX IF NOT EXISTS plans_recent ON plan_summaries(updated DESC);
+            CREATE TRIGGER IF NOT EXISTS plan_insert AFTER INSERT ON jobs BEGIN
+              INSERT OR REPLACE INTO plan_summaries VALUES(NEW.id,coalesce(json_extract(NEW.payload,'$.seller_profile.id'),'premium-packaging'),json_extract(NEW.payload,'$.plan'),NEW.stage,NEW.updated);
+            END;
+            CREATE TRIGGER IF NOT EXISTS plan_update AFTER UPDATE OF payload,stage,updated ON jobs BEGIN
+              INSERT OR REPLACE INTO plan_summaries VALUES(NEW.id,coalesce(json_extract(NEW.payload,'$.seller_profile.id'),'premium-packaging'),json_extract(NEW.payload,'$.plan'),NEW.stage,NEW.updated);
+            END;
+            INSERT OR IGNORE INTO plan_summaries SELECT id,coalesce(json_extract(payload,'$.seller_profile.id'),'premium-packaging'),json_extract(payload,'$.plan'),stage,updated FROM jobs WHERE id NOT IN (SELECT job_id FROM plan_summaries);
             INSERT OR IGNORE INTO settings VALUES('paused','true');
             ''')
     @contextlib.contextmanager
@@ -62,12 +75,12 @@ class Store:
                 source=c.execute("SELECT a.id,j.brand FROM attempts a JOIN jobs j ON j.id=a.job_id WHERE a.id=? AND a.company_key=? AND a.result='accepted'",(followup_of,company_key)).fetchone()
                 if not source or source['brand']!=brand or not evidence:raise ValueError('Follow-up needs an accepted same-brand source and explicit new-value evidence')
                 c.execute('INSERT INTO followups VALUES(?,?,?)',(jid,followup_of,evidence))
-            c.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,0)',(jid,brand,company_key,recipient,stage,'queued',json.dumps(payload,ensure_ascii=False),time.time()))
+            c.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,0)',(jid,brand,company_key,recipient,stage,'queued',json.dumps(blobs.pack(self.root,payload),ensure_ascii=False),time.time()))
             now=time.time();c.execute('INSERT INTO timing VALUES(?,?,?)',(jid,now,origin if origin is not None else now))
         return jid
-    def get(self,jid):
+    def get(self,jid,load_images=True):
         with self.db() as c:r=dict(c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone())
-        r['payload']=json.loads(r['payload']);return r
+        p=json.loads(r['payload']);r['payload']=blobs.hydrate(self.root,p) if load_images else p;return r
     def queue(self):
         with self.db() as c:return [dict(x) for x in c.execute("SELECT id,brand,stage FROM jobs WHERE state='queued' AND next_at<=? ORDER BY updated",(time.time(),))]
     def claim(self,jid):
@@ -79,10 +92,10 @@ class Store:
             return claimed
     def advance(self,jid,stage,payload,state='queued'):
         with self.db() as c:
-            now=time.time();c.execute('UPDATE jobs SET stage=?,state=?,payload=?,updated=?,next_at=0 WHERE id=?',(stage,state,json.dumps(payload,ensure_ascii=False),now,jid))
+            now=time.time();c.execute('UPDATE jobs SET stage=?,state=?,payload=?,updated=?,next_at=0 WHERE id=?',(stage,state,json.dumps(blobs.pack(self.root,payload),ensure_ascii=False),now,jid))
             c.execute('UPDATE stage_times SET ended=?,outcome=? WHERE job_id=? AND ended IS NULL',(now,state,jid))
     def fail(self,jid,state,error,delay=0):
-        job=self.get(jid);p=job['payload'];p['last_error']=error
+        job=self.get(jid,load_images=False);p=job['payload'];p['last_error']=error
         with self.db() as c:
             now=time.time();c.execute('UPDATE jobs SET state=?,payload=?,next_at=?,updated=? WHERE id=?',(state,json.dumps(p,ensure_ascii=False),now+delay,now,jid))
             c.execute('UPDATE stage_times SET ended=?,outcome=? WHERE job_id=? AND ended IS NULL',(now,state,jid))
@@ -91,12 +104,12 @@ class Store:
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE');r=c.execute('SELECT state,output FROM runs WHERE id=?',(rid,)).fetchone()
             if r:
-                if r['state']=='complete':return json.loads(r['output'])
+                if r['state']=='complete':return blobs.hydrate(self.root,json.loads(r['output']))
                 if r['state']!='retryable':raise RuntimeError('Unresolved API request '+rid+'; do not repeat blindly')
             c.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,NULL)',(rid,jid,stage,'running',None,time.time()))
         try:
             result=fn(rid)
-            with self.db() as c:c.execute("UPDATE runs SET state='complete',output=?,ended=? WHERE id=?",(json.dumps(result,ensure_ascii=False),time.time(),rid))
+            with self.db() as c:c.execute("UPDATE runs SET state='complete',output=?,ended=? WHERE id=?",(json.dumps(blobs.pack(self.root,result),ensure_ascii=False),time.time(),rid))
             return result
         except Exception as e:
             from .providers import RetryLater,ProviderRejected
