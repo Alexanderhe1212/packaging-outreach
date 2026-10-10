@@ -224,7 +224,7 @@ def image_prompt(profile, p, plan):
 def make_image(account, profile, p, plan, photo):
     prompt = image_prompt(profile, p, plan)
     raw = llm.Stage('image', account['id']).image(prompt, shrink(photo, 1536) if photo else None)
-    return to_jpeg(raw, 1600, 85), prompt
+    return to_jpeg(raw, 1280, 76), prompt
 
 
 # ---------- image utilities (macOS sips; elsewhere images pass through unchanged) ----------
@@ -253,8 +253,8 @@ def shrink(raw, max_px):
     return _sips(raw, ['-s', 'format', 'jpeg', '-s', 'formatOptions', '82', '-Z', str(max_px)], '.jpg') or raw
 
 
-def to_jpeg(raw, max_px=1600, quality=85):
-    """E-mail friendly ~200-400 KB JPEG instead of a 2-3 MB PNG."""
-    if raw[:3] == b'\xff\xd8\xff' and len(raw) < 700000:
+def to_jpeg(raw, max_px=1600, quality=85, keep_below=300000):
+    """E-mail friendly ~150-250 KB JPEG instead of a 2-3 MB PNG (smaller mails = mailbox fills much more slowly)."""
+    if raw[:3] == b'\xff\xd8\xff' and len(raw) < keep_below:
         return raw
     return _sips(raw, ['-s', 'format', 'jpeg', '-s', 'formatOptions', str(quality), '-Z', str(max_px)], '.jpg') or raw

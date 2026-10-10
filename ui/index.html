@@ -182,11 +182,17 @@ async function refresh(){
       <div class="kpis"><div class="kpi"><b>${s.sent_today||0}<small class="muted" style="font-size:12px">/${lim||'不限'}</small></b><span>今日已发</span><div class="bar"><i style="width:${pct}%"></i></div></div>
       <div class="kpi"><b>${s.ready||0}</b><span>待发送${a.auto_send?'':'（审核）'}</span></div><div class="kpi"><b>${s.replied||0}</b><span>已回复</span></div>
       <div class="kpi"><b>${money(s.cost_today)}</b><span>今日 AI 费用</span></div></div>
+      ${mailboxBar(a)}
       <div class="row muted" style="font-size:12px;gap:14px"><span>准备中 ${working}</span><span>候选池 ${s.candidates||0}</span><span>累计发送 ${(s.sent||0)+(s.unknown||0)+(s.replied||0)}</span><span>${Math.round((s.tokens_today||0)/1000)}k tokens 今日</span>
       <div class="spacer"></div><button class="small" onclick="openAdd('${a.id}')">＋ 添加客户</button></div></div>`}).join('');
   const sel=$('#facc'),cur=sel.value;sel.innerHTML='<option value="">全部账号</option>'+st.accounts.map(a=>`<option value="${a.id}">${E(a.name)}</option>`).join('');sel.value=cur;
 }
 
+const GB=b=>b>=1e9?(b/1073741824).toFixed(2)+' GB':Math.round((b||0)/1048576)+' MB';
+function mailboxBar(a){const m=a.mailbox;if(!m||!m.limit)return '';const pct=Math.min(100,100*m.used/m.limit),warn=pct>80;
+  return `<div style="margin:-4px 0 10px;font-size:12px" class="muted">邮箱空间 ${GB(m.used)} / ${GB(m.limit)}${warn?' <b style="color:var(--bad)">快满了：设置 → 账号 → 邮箱存档</b>':''}
+  <div class="bar"><i style="width:${pct}%;${warn?'background:var(--bad)':''}"></i></div></div>`}
+const fileLink=(f,label)=>`<a href="/file?path=${encodeURIComponent(f)}" ${f.endsWith('.jpg')?'target="_blank"':''}>${label}</a>`;
 async function loadUsage(){
   try{const u=await api('/api/usage?days=7');const tot=u.rows.reduce((t,r)=>({c:t.c+r.cost,i:t.i+r.input+r.output,img:t.img+r.images,calls:t.calls+r.calls}),{c:0,i:0,img:0,calls:0});
     const pe=u.per_email||{};
@@ -217,7 +223,10 @@ async function openLead(id){
     ['官网',p.website?`<a href="${E(p.website)}" target="_blank">${E(p.website)}</a>`:''],['国家',p.country],['产品',p.product_url?`<a href="${E(p.product_url)}" target="_blank">${E(p.product_name)}</a>`:E(p.product_name)],
     ['产品信息',E([p.product_price,...(p.product_facts||[])].filter(Boolean).join(' · '))],['A 方案',E((plan.a||{}).name)],['B 方案',E((plan.b||{}).name)],
     ['AI 成本',`${money(l.cost)} · ${(l.tokens||0).toLocaleString()} tokens · ${(l.usage||[]).map(u=>E(u.stage)).join(' + ')}`],['错误',l.error?`<span class="err">${E(l.error)}</span>`:'']].filter(f=>f[1]);
-  $('#dbody').innerHTML=`${l.reply_excerpt?`<div class="reply"><b>客户回复：</b>\n${E(l.reply_excerpt)}</div>`:''}
+  const reps=(l.data||{}).replies||[],files=(l.data||{}).files||[];
+  const repHtml=reps.length?reps.map(r=>`<div class="reply"><b>客户回复</b> <span class="muted">${new Date(r.at*1000).toLocaleString()}</span> · ${fileLink(r.file,'打开原邮件（含附件）')}\n${E(r.excerpt)}</div>`).join(''):(l.reply_excerpt?`<div class="reply"><b>客户回复：</b>\n${E(l.reply_excerpt)}</div>`:'');
+  const fileHtml=(files.length||l.has_image)?`<div class="row" style="margin-bottom:10px;font-size:13px"><span class="muted">本地存档：</span>${files.map(f=>fileLink(f,f.includes('followup')?'跟进邮件 .eml':'当时发出的邮件 .eml')).join(' · ')}${l.has_image?`${files.length?' · ':''}<a href="/image/${id}" target="_blank">效果图大图</a>`:''}</div>`:'';
+  $('#dbody').innerHTML=`${repHtml}${fileHtml}
     <div class="row" style="margin-bottom:12px">${canSend?`<button class="primary" onclick="leadAct('send',${id})">✉ 立即发送</button>`:''}
     ${!locked&&l.subject?`<button onclick="editLead(${id})">✎ 修改文字</button>`:''}${!locked&&plan.a?`<button onclick="leadAct('redo',${id},'image')">↻ 重做图片</button>`:''}
     ${!locked?`<button onclick="leadAct('redo',${id},'all')">↻ 重写邮件+图片</button>`:''}${!['sent','unknown','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
@@ -300,11 +309,26 @@ function renderAcc(){
    <label class="wide">签名文字<textarea data-a="${i}" data-k="signature" rows="5">${E(a.signature||'')}</textarea></label>
    <label>签名图片 ${a.signature_image?'<span style="color:var(--good)">✓ 已设置</span>':''}<input type="file" accept="image/*" onchange="uploadSig('${a.id}',this)"></label>
    <label>钥匙串服务名（旧版密码，可选）<input data-a="${i}" data-k="keychain_service" value="${E(a.keychain_service||'')}"></label>
+   <div class="wide" style="border-top:1px dashed var(--line);padding-top:10px"><b>邮箱空间 · 本地存档</b>
+    <p class="hint" style="margin:4px 0 8px">发出的邮件、效果图、客户回复都会自动存一份到本机。开启后，每天把服务器上超过 N 天的旧邮件完整存到本地（含图片和附件），核对保存成功后才从服务器删除，释放邮箱空间。</p>
+    <div class="row"><label class="hint">自动存档并清理<select data-a="${i}" data-k="mail_archive.enabled">${opt('false','关闭',String(!!(a.mail_archive||{}).enabled))}${opt('true','开启（每天一次）',String(!!(a.mail_archive||{}).enabled))}</select></label>
+     <label class="hint">邮箱总容量（GB，服务器不提供时填写）<input type="number" min="0" step="0.5" data-a="${i}" data-k="mailbox_limit_gb" value="${a.mailbox_limit_gb||''}" style="width:80px"></label>
+     <label class="hint">保留最近（天）<input type="number" min="1" data-a="${i}" data-k="mail_archive.days" value="${(a.mail_archive||{}).days||7}" style="width:80px"></label>
+     ${[['sent','已发送'],['trash','已删除'],['junk','垃圾邮件'],['inbox','收件箱']].map(([k,l])=>`<label class="chk"><input type="checkbox" data-arch="${i}" value="${k}" ${((a.mail_archive||{}).folders||['sent','trash']).includes(k)?'checked':''}> ${l}</label>`).join('')}</div>
+    <div class="row" style="margin-top:8px"><button class="small" onclick="mailboxInfo('${a.id}')">查看邮箱用量</button><button class="small" onclick="archiveNow('${a.id}',true)">预览可释放空间</button><button class="small" onclick="archiveNow('${a.id}',false)">立即存档并清理</button><button class="small" onclick="api('/api/open-folder',{account:'${a.id}',kind:'archive'})">打开本地存档</button><button class="small" onclick="api('/api/open-folder',{account:'${a.id}',kind:'sent'})">打开已发邮件</button></div>
+    <div class="hint" id="ar_${a.id}" style="margin-top:6px;white-space:pre-wrap"></div></div>
    <div class="row wide"><button class="small" onclick="testMail('${a.id}')">测试邮箱登录</button><span class="hint" id="m_${a.id}"></span><div class="spacer"></div><button class="small danger" onclick="delAcc(${i})">删除账号</button></div>
   </div></fieldset>`).join('');
   h+=`<button class="small" onclick="addAcc()">＋ 添加账号</button>`;
   $('#sbody').innerHTML=h;
 }
+async function mailboxInfo(id){const t=$('#ar_'+id);t.textContent='读取邮箱中…';try{const r=await api('/api/mailbox?refresh=1&account='+id);
+  t.textContent=(r.limit?`已用 ${GB(r.used)} / ${GB(r.limit)}\n`:'')+r.folders.slice(0,8).map(f=>`${f.name}：${f.messages} 封，${GB(f.bytes)}`).join('\n')}catch(e){t.textContent='✗ '+e.message}}
+async function archiveNow(id,dry){collect();const a=S.settings.accounts.find(x=>x.id===id),cfg=a.mail_archive||{};
+  if(!dry&&!confirm(`把 ${id} 邮箱里超过 ${cfg.days||7} 天的邮件存到本地，然后从服务器删除？（本地存档核对成功才会删除）`))return;
+  const t=$('#ar_'+id);t.textContent=dry?'统计中…':'存档中，邮件多时需要几分钟…';
+  try{const r=await api('/api/archive',{account:id,dry_run:dry,days:cfg.days||7,folders:cfg.folders||['sent','trash']});
+   t.textContent=(dry?'可释放：':'已存档并清理：')+`${r.archived} 封，${GB(r.bytes)}\n`+r.folders.map(f=>`${f.name}：${f.messages} 封 ${GB(f.bytes)}`).join('\n')+(dry&&r.archived>=300?'\n（每次最多处理 300 封/文件夹，可多点几次）':'')}catch(e){t.textContent='✗ '+e.message}}
 function mailPreset(i,k){if(!k)return;collect();const m=S.settings.mail_presets[k],a=S.settings.accounts[i];a.smtp={...m.smtp};a.imap={...m.imap};renderSettings()}
 function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:30,send_interval_minutes:[4,9],auto_send:false,language:'en'});renderSettings()}
 function delAcc(i){if(!confirm('删除这个账号？已发送记录会保留。'))return;collect();S.settings.accounts.splice(i,1);renderSettings()}
@@ -354,11 +378,15 @@ function collect(){
     if(k==='interval0'||k==='interval1'){a.send_interval_minutes=a.send_interval_minutes||[4,9];a.send_interval_minutes[+k.slice(-1)]=+v||0}
     else if(k==='hours0'||k==='hours1'){a._h=a._h||[...(a.send_hours_beijing||['',''])];a._h[+k.slice(-1)]=v}
     else if(k==='focus')a.focus=v.split('\n').map(s=>s.trim()).filter(Boolean);
-    else if(['auto_send','followup_enabled'].includes(k))a[k]=v==='true';
+    else if(['auto_send','followup_enabled','mail_archive.enabled'].includes(k))setPath(a,k,v==='true');
+    else if(k==='mail_archive.days')setPath(a,k,+v||7);
+    else if(k==='mailbox_limit_gb')a[k]=+v||0;
     else if(['daily_limit','followup_days','smtp.port','imap.port'].includes(k))setPath(a,k,+v||0);
     else setPath(a,k,v.trim())});
   if($('#totalLimit'))st.daily_limit_total=+$('#totalLimit').value||0;
   if($('#crossLock'))st.cross_account_dedupe=$('#crossLock').checked;
+  const arch={};document.querySelectorAll('[data-arch]').forEach(el=>{(arch[el.dataset.arch]=arch[el.dataset.arch]||[]);if(el.checked)arch[el.dataset.arch].push(el.value)});
+  Object.entries(arch).forEach(([i,f])=>setPath(st.accounts[+i],'mail_archive.folders',f));
   st.accounts.forEach(a=>{if(a._h){a.send_hours_beijing=(a._h[0]!==''&&a._h[1]!=='')?[+a._h[0],+a._h[1]]:null;delete a._h}});
   if(S.stab==='prof')collectProf();
 }

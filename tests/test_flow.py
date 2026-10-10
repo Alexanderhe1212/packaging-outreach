@@ -221,6 +221,20 @@ class FlowTest(unittest.TestCase):
         self.assertIn('Do not repeat', note)
         store.update(lid, status='skipped')
 
+    def test_archive_helpers(self):
+        from outreach import archive
+        self.assertEqual(archive.utf7_decode('&XfJT0ZAB-'), '已发送')
+        self.assertEqual(archive.role({'name': 'Sent Messages', 'flags': ''}), 'sent')
+        self.assertEqual(archive.role({'name': 'X', 'flags': '\\hasnochildren \\trash'}), 'trash')
+        raw = b'From: a@b.com\r\nTo: hello@brand.com\r\nSubject: two box ideas\r\nDate: Sat, 10 Oct 2026 10:00:00 +0800\r\n\r\nhi'
+        acc = config.account('MTT')
+        p1 = archive.save_raw(acc, 'Sent Messages', raw)
+        self.assertEqual(p1.read_bytes(), raw)
+        self.assertEqual(archive.save_raw(acc, 'Sent Messages', raw), p1, 'same message is not stored twice')
+        self.assertTrue(server.local_file(str(p1)))
+        with self.assertRaises(KeyError):
+            server.local_file('/etc/hosts')  # only files inside the data folder are served
+
     def test_prompt_is_cache_friendly(self):
         acc, prof = config.account('MTT'), config.profile('packaging')
         s1, _ = pipeline.writer_prompts(acc, prof, {'product_name': 'A'}, True)

@@ -6,7 +6,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from . import config, llm, mailer, pipeline, store, web
+from . import archive, config, llm, mailer, pipeline, store, web
 
 
 TURN = threading.Lock()  # accounts take turns: only one prepares or sends at any moment
@@ -108,6 +108,17 @@ class AccountWorker(threading.Thread):
             raise
         except Exception as e:
             self.error = '收件箱检查失败：%s' % type(e).__name__
+        acc = self.acc
+        try:
+            if archive.due(acc):
+                self.activity = '存档旧邮件到本地并清理服务器邮箱…'
+                archive.run(acc)
+            if time.time() - (store.get('mailbox_' + self.id) or {}).get('at', 0) > 6 * 3600:
+                archive.report(acc)
+        except mailer.MailAuthError:
+            raise
+        except Exception as e:
+            self.error = '邮箱存档失败：%s' % e
 
     def step(self, block=True):
         acc = self.acc
@@ -248,7 +259,7 @@ class AccountWorker(threading.Thread):
             now = time.time()
             if result in ('sent', 'unknown'):
                 store.update(lead['id'], status=result, sent_at=now, message_id=str(msg['Message-ID']), error=note)
-                mailer.save_eml(lead['id'], msg, self.id)
+                mailer.save_eml(lead['id'], msg, self.id, lead, img)
                 self.schedule_next(acc, now)
             elif result == 'bounced':
                 store.update(lead['id'], status='bounced', error=note)
@@ -288,5 +299,5 @@ class AccountWorker(threading.Thread):
         store.update(lead['id'], followups=1, followup_at=time.time(), error=note if result != 'sent' else lead['error'])
         key = 'followups_%s_%s' % (self.id, store.today())
         store.put(key, (store.get(key, 0) or 0) + 1)
-        mailer.save_eml('%s-followup' % lead['id'], msg, self.id)
+        mailer.save_eml('%s-followup' % lead['id'], msg, self.id, lead)
         self.schedule_next(acc, time.time())

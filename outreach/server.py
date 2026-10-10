@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import VERSION, config, legacy, llm, mailer, pipeline, store, updater, web
+from . import VERSION, archive, config, legacy, llm, mailer, pipeline, store, updater, web
 from .worker import AccountWorker
 
 WORKERS = {}
@@ -54,7 +54,8 @@ def api_state(_q):
         accounts.append(dict(id=a['id'], name=a.get('name') or a['id'], sender=a['sender'], profile=a.get('profile', 'packaging'),
                              paused=w.paused if w else True, activity=w.activity if w else '', error=w.error if w else '',
                              stats=store.stats(a['id']), auto_send=a.get('auto_send', True), daily_limit=int(a.get('daily_limit') or 0),
-                             color=a.get('color', '')))
+                             color=a.get('color', ''), mailbox=store.get('mailbox_' + a['id']),
+                             archive=store.get('archive_last_' + a['id'])))
     conns = cfg['connections']
     ready = all(sec['keys'].get(s.get('connection')) or conns.get(s.get('connection'), {}).get('preset') == 'codex'
                 for s in cfg['stages'].values())
@@ -187,7 +188,7 @@ def api_signature(data):
     if not web.is_image(raw):
         raise ValueError('请上传 PNG / JPG 图片')
     path = config.data_dir() / ('signature-%s.jpg' % aid)
-    path.write_bytes(pipeline.to_jpeg(raw, 1200, 88))
+    path.write_bytes(pipeline.to_jpeg(raw, 760, 72, keep_below=60000))
     accs = config.load()['accounts']
     for a in accs:
         if a['id'] == aid:
@@ -195,6 +196,39 @@ def api_signature(data):
     config.save({'accounts': accs})
     mailer._sig_cache.clear()
     return {'ok': True}
+
+
+def api_mailbox(qs):
+    aid = qs.get('account', [''])[0]
+    if qs.get('refresh', [''])[0]:
+        return archive.report(config.account(aid))
+    return store.get('mailbox_' + aid) or archive.report(config.account(aid))
+
+
+def api_archive(data):
+    acc = config.account(data['account'])
+    r = archive.run(acc, data.get('days'), data.get('folders'), limit=int(data.get('limit', 300)), dry_run=bool(data.get('dry_run', True)))
+    if not r['dry_run']:
+        archive.report(acc)
+    return r
+
+
+def api_open_folder(data):
+    d = config.data_dir() / 'accounts' / data['account'] / data.get('kind', 'archive')
+    d.mkdir(parents=True, exist_ok=True)
+    if sys.platform == 'darwin':
+        import subprocess
+        subprocess.Popen(['open', str(d)])
+    return {'path': str(d)}
+
+
+def local_file(path):
+    """Serve files from the data folder only (sent .eml, concept images, saved replies, archive)."""
+    p = Path(path).resolve()
+    root = config.data_dir().resolve()
+    if root not in p.parents or not p.is_file():
+        raise KeyError('file not available')
+    return p
 
 
 def api_import(data):
@@ -218,13 +252,13 @@ def api_quit(_data):
     return {'ok': True}
 
 
-GET = {'/api/state': api_state, '/api/leads': api_leads, '/api/settings': api_settings_get,
+GET = {'/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
        '/api/usage': lambda qs: store.usage_summary(int(qs.get('days', ['7'])[0])),
        '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION}}
 POST = {'/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
         '/api/send': api_send, '/api/skip': api_skip, '/api/edit': api_edit, '/api/redo': api_redo,
         '/api/settings': api_settings_post, '/api/profile': api_profile, '/api/signature': api_signature,
-        '/api/import-csv': api_import,
+        '/api/import-csv': api_import, '/api/archive': api_archive, '/api/open-folder': api_open_folder,
         '/api/test-api': lambda d: llm.test_connection(d['connection']),
         '/api/test-mail': lambda d: {'ok': True, 'message': mailer.test_login(config.account(d['account']))},
         '/api/update/apply': api_update_apply, '/api/quit': api_quit}
@@ -264,6 +298,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(GET[u.path](parse_qs(u.query)))
             if u.path.startswith('/api/lead/'):
                 return self.reply(api_lead(u.path.rsplit('/', 1)[1]))
+            if u.path == '/file':
+                p = local_file(parse_qs(u.query).get('path', [''])[0])
+                ctype = {'.eml': 'message/rfc822', '.jpg': 'image/jpeg', '.png': 'image/png'}.get(p.suffix.lower(), 'application/octet-stream')
+                body = p.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(len(body)))
+                if p.suffix.lower() == '.eml':
+                    from urllib.parse import quote
+                    self.send_header('Content-Disposition', "attachment; filename*=UTF-8''%s" % quote(p.name))
+                self.end_headers()
+                return self.wfile.write(body)
             if u.path.startswith('/image/'):
                 lead = store.lead(int(u.path.rsplit('/', 1)[1]))
                 return self.reply(Path(lead['image']).read_bytes(), ctype='image/jpeg')

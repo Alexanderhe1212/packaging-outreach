@@ -5,6 +5,7 @@
   outreach stop      （或 outreach 收工）暂停所有账号
   outreach open      打开界面窗口
   outreach replies   最近的客户回复
+  outreach find X    按客户邮箱/域名/公司查当时发了什么（邮件、效果图、回复的本地文件）
 
   python3 app.py                 启动并打开窗口（已在运行则直接打开窗口）
   python3 app.py --no-browser    只启动后台服务
@@ -111,6 +112,24 @@ def cli(cmd, args):
         print('已暂停所有账号（后台仍在检查回复）。继续：outreach go')
     elif cmd == 'open':
         open_window()
+    elif cmd == 'find':
+        from urllib.parse import quote
+        items = call('/api/leads?limit=10&q=' + quote(' '.join(args)))['items']
+        if not items:
+            print('没有找到：' + ' '.join(args))
+        for l in items:
+            d = call('/api/lead/%d' % l['id'])
+            plan = d['data'].get('plan') or {}
+            print('■ %s <%s>  %s  %s' % (l['company'], l['email'], l['account'], l['status']))
+            print('  主题：%s' % l['subject'])
+            print('  A：%s   B：%s' % ((plan.get('a') or {}).get('name', ''), (plan.get('b') or {}).get('name', '')))
+            for f in d['data'].get('files', []):
+                print('  邮件：' + f)
+            if d.get('has_image'):
+                print('  效果图：%s/image/%d' % (URL, l['id']))
+            for r in d['data'].get('replies', []):
+                print('  回复：' + r['file'])
+            print('  预览：%s/preview/%d\n' % (URL, l['id']))
     elif cmd == 'replies':
         for l in call('/api/leads?status=replied&limit=%s' % (args[0] if args else 10))['items']:
             d = call('/api/lead/%d' % l['id'])

@@ -55,9 +55,9 @@ def smtp_connect(acc):
     return c
 
 
-def imap_connect(acc):
+def imap_connect(acc, timeout=30):
     c = imaplib.IMAP4_SSL(acc['imap']['host'], int(acc['imap'].get('port', 993)), ssl_context=ssl.create_default_context(),
-                          timeout=30)
+                          timeout=timeout)
     try:
         c.login(acc.get('login') or acc['sender'], password(acc))
     except imaplib.IMAP4.error:
@@ -88,7 +88,7 @@ def signature_image(acc):
     if path not in _sig_cache:
         try:
             from .pipeline import to_jpeg
-            _sig_cache[path] = to_jpeg(config.resolve(path).read_bytes(), 1200, 88)
+            _sig_cache[path] = to_jpeg(config.resolve(path).read_bytes(), 760, 72, keep_below=60000)
         except Exception:
             _sig_cache[path] = None
     return _sig_cache[path]
@@ -211,10 +211,38 @@ def send(acc, msg):
                 pass
 
 
-def save_eml(name, msg, account=''):
-    d = config.data_dir() / 'accounts' / account / 'sent' if account else config.data_dir() / 'sent'
+def account_dir(account, kind):
+    d = config.data_dir() / 'accounts' / account / kind / datetime.now().strftime('%Y-%m')
     d.mkdir(parents=True, exist_ok=True)
-    (d / ('%s.eml' % name)).write_bytes(msg.as_bytes())
+    return d
+
+
+def save_eml(name, msg, account='', lead=None, image=None):
+    """Keep every sent email locally (with a copy of the concept image beside it), named so Finder search finds it."""
+    d = account_dir(account or '_', 'sent')
+    stem = '%s_%s' % (datetime.now().strftime('%Y%m%d-%H%M'), name)
+    if lead:
+        stem += '_' + re.sub(r'[^\w.@-]+', '_', lead.get('domain') or lead.get('email') or '')[:50]
+    path = d / (stem + '.eml')
+    path.write_bytes(msg.as_bytes())
+    if image:
+        (d / (stem + '.jpg')).write_bytes(image)
+    if lead:
+        data = store.lead(lead['id'])['data']
+        data.setdefault('files', []).append(str(path))
+        store.update(lead['id'], data=data)
+    return path
+
+
+def save_reply(account, lid, raw, text):
+    """Full reply (attachments included) saved locally and listed on the lead, so it can be read after server cleanup."""
+    lead = store.lead(lid)
+    d = account_dir(account, 'replies')
+    path = d / ('%s_%s_%s.eml' % (datetime.now().strftime('%Y%m%d-%H%M'), lid, re.sub(r'[^\w.@-]+', '_', lead.get('domain') or '')[:50]))
+    path.write_bytes(raw)
+    data = lead['data']
+    data.setdefault('replies', []).append({'file': str(path), 'at': time.time(), 'excerpt': text[:2000]})
+    store.update(lid, data=data)
 
 
 # ---------------- inbox ----------------
@@ -280,7 +308,7 @@ def sync_inbox(acc):
                 if m and (parseaddr(frm)[1].lower() in sent or BOUNCE_FROM.search(frm) or BOUNCE_SUBJ.search(subj)):
                     wanted.append(int(m.group(1)))
         for uid in wanted:
-            typ, parts = c.uid('fetch', str(uid), '(BODY.PEEK[]<0.200000>)')
+            typ, parts = c.uid('fetch', str(uid), '(BODY.PEEK[])')
             raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), None)
             if not raw:
                 continue
@@ -299,6 +327,7 @@ def sync_inbox(acc):
                 continue
             text = fresh_text(msg)
             lid = sent[sender]
+            save_reply(aid, lid, raw, text)
             if any(w in text.lower()[:600] for w in STOP_WORDS):
                 store.update(lid, status='unsubscribed', reply_at=time.time(), reply_excerpt=text[:2000])
                 store.suppress(sender, 'unsubscribe', aid, 'reply')
