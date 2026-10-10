@@ -276,8 +276,9 @@ async function testApi(name){collect();const t=$('#t_'+name);t.textContent='保�
 const ACC_FIELDS=[['name','显示名称'],['id','代号（英文，唯一）'],['company_name','公司名（写进邮件）'],['contact_name','联系人名字'],['from_name','发件人显示名'],['sender','发件邮箱'],['whatsapp','WhatsApp（纯数字，含国家码）'],['website','公司官网']];
 function renderAcc(){
   const st=S.settings,M=st.mail_presets,profs=st.profiles;
-  let h=`<p class="hint" style="margin-top:0">每个账号独立发信、独立节奏；所有账号共用一份去重名单，同一家公司不会被两个账号重复联系。</p>
-   <div class="form" style="margin-bottom:14px"><label>所有账号合计每日上限（封，0 = 不限）<input type="number" min="0" id="totalLimit" value="${st.daily_limit_total||0}"></label></div>`;
+  let h=`<p class="hint" style="margin-top:0">每个账号独立发信、独立资料，轮流工作（同一时间只有一个账号在准备或发送）。</p>
+   <div class="form" style="margin-bottom:14px"><label>所有账号合计每日上限（封，0 = 不限）<input type="number" min="0" id="totalLimit" value="${st.daily_limit_total||0}"></label>
+   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" ${st.cross_account_dedupe?'checked':''}> 跨账号防撞：同一家公司只被一个账号联系（关闭 = 账号资料完全分开）</label></div>`;
   h+=st.accounts.map((a,i)=>`<fieldset><legend>${E(a.name||a.id||'新账号')}</legend><div class="form">
    ${ACC_FIELDS.map(([k,l])=>`<label>${l}<input data-a="${i}" data-k="${k}" value="${E(a[k]||'')}"></label>`).join('')}
    <label>邮箱服务商<select onchange="mailPreset(${i},this.value)"><option value="">自定义…</option>${Object.entries(M).map(([k,m])=>opt(k,m.label,a.smtp&&a.smtp.host===m.smtp.host?k:'')).join('')}</select></label>
@@ -357,12 +358,13 @@ function collect(){
     else if(['daily_limit','followup_days','smtp.port','imap.port'].includes(k))setPath(a,k,+v||0);
     else setPath(a,k,v.trim())});
   if($('#totalLimit'))st.daily_limit_total=+$('#totalLimit').value||0;
+  if($('#crossLock'))st.cross_account_dedupe=$('#crossLock').checked;
   st.accounts.forEach(a=>{if(a._h){a.send_hours_beijing=(a._h[0]!==''&&a._h[1]!=='')?[+a._h[0],+a._h[1]]:null;delete a._h}});
   if(S.stab==='prof')collectProf();
 }
 async function persist(){
   const st=S.settings;
-  const r=await api('/api/settings',{connections:st.connections,stages:st.stages,accounts:st.accounts,daily_limit_total:st.daily_limit_total||0,keys:S.keys,passwords:S.pw});
+  const r=await api('/api/settings',{connections:st.connections,stages:st.stages,accounts:st.accounts,daily_limit_total:st.daily_limit_total||0,cross_account_dedupe:!!st.cross_account_dedupe,keys:S.keys,passwords:S.pw});
   for(const id of (S.pdirty||[]))await api('/api/profile',{profile:st.profiles[id]});S.pdirty=new Set();
   const profiles=st.profiles;S.settings=r;S.settings.profiles=profiles;S.keys={};S.pw={};
 }

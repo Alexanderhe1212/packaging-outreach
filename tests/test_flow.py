@@ -208,6 +208,19 @@ class FlowTest(unittest.TestCase):
         for w in server.WORKERS.values():
             w.stopped = True
 
+    def test_accounts_are_separate_and_concepts_vary(self):
+        store.suppress('only-mtt@brand-x.com', 'legacy_contacted', 'MTT')
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='MTT'))
+        self.assertFalse(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'accounts do not share history')
+        config.save({'cross_account_dedupe': True})
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'optional cross-account lock')
+        config.save({'cross_account_dedupe': False})
+        lid = store.add_lead('MTT', 'sent', data={'plan': {'a': {'structure': 'magnetic flap rigid box'}, 'b': {'structure': 'drawer / slide box'}}})
+        note = pipeline.variety_note(config.account('MTT'), config.profile('packaging'))
+        self.assertIn('magnetic flap rigid box', note)
+        self.assertIn('Do not repeat', note)
+        store.update(lid, status='skipped')
+
     def test_prompt_is_cache_friendly(self):
         acc, prof = config.account('MTT'), config.profile('packaging')
         s1, _ = pipeline.writer_prompts(acc, prof, {'product_name': 'A'}, True)

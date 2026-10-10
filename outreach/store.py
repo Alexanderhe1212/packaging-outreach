@@ -157,7 +157,7 @@ def add_candidates(account, items):
         d = (c.get('domain') or '').lower().strip()
         if d.startswith('www.'):
             d = d[4:]
-        if not d or '.' not in d or blocked(domain=d):
+        if not d or '.' not in d or blocked(domain=d, account=account):
             continue
         if q('SELECT 1 FROM candidates WHERE domain=?', (d,)):
             continue
@@ -175,8 +175,8 @@ def mark_candidate(domain, status, reason=''):
     x('UPDATE candidates SET status=?, reason=? WHERE domain=?', (status, reason[:200], domain))
 
 
-def recent_candidate_domains(limit=40):
-    return [r['domain'] for r in q('SELECT domain FROM candidates ORDER BY created_at DESC LIMIT ?', (limit,))]
+def recent_candidate_domains(account, limit=40):
+    return [r['domain'] for r in q('SELECT domain FROM candidates WHERE account=? ORDER BY created_at DESC LIMIT ?', (account, limit))]
 
 
 # ---------- dedupe / suppression ----------
@@ -185,27 +185,56 @@ def suppress(value, kind, account='', note=''):
         x('INSERT OR REPLACE INTO suppress VALUES(?,?,?,?,?)', (value.lower(), kind, account, note[:300], time.time()))
 
 
-def blocked(email='', domain=''):
-    """True when this address/company was already contacted (by any account), is being prepared, or opted out."""
+def shared():
+    """Accounts are fully separate unless the user turns on the cross-account lock in settings."""
+    return bool(config.load().get('cross_account_dedupe', False))
+
+
+def _scope(account):
+    if not account or shared():
+        return '', []
+    return ' AND account IN (?, \'\')', [account]
+
+
+def blocked(email='', domain='', account=''):
+    """True when this address/company was already contacted by this account (or by any account if the lock is on),
+    is being prepared, or opted out. Entries imported without an account (CSV / constraints) apply to every account."""
     from .web import root_domain
     vals = [v.lower() for v in (email, domain, root_domain(domain) if domain else '') if v]
     if not vals:
         return False
+    extra, args = _scope(account)
     marks = ','.join('?' for _ in vals)
-    if q('SELECT 1 FROM suppress WHERE value IN (' + marks + ') LIMIT 1', vals):
+    if q('SELECT 1 FROM suppress WHERE value IN (' + marks + ')' + extra + ' LIMIT 1', vals + args):
         return True
-    if domain and q("SELECT 1 FROM leads WHERE domain IN (?,?) AND status NOT IN ('skipped','failed') LIMIT 1",
-                    (domain.lower(), root_domain(domain))):
+    lextra = ' AND account=?' if account and not shared() else ''
+    largs = [account] if lextra else []
+    if domain and q("SELECT 1 FROM leads WHERE domain IN (?,?) AND status NOT IN ('skipped','failed')" + lextra + " LIMIT 1",
+                    [domain.lower(), root_domain(domain)] + largs):
         return True
-    if email and q("SELECT 1 FROM leads WHERE email=? AND status NOT IN ('skipped','failed') LIMIT 1", (email.lower(),)):
+    if email and q("SELECT 1 FROM leads WHERE email=? AND status NOT IN ('skipped','failed')" + lextra + " LIMIT 1",
+                   [email.lower()] + largs):
         return True
     return False
 
 
-def hard_blocked(email):
+def hard_blocked(email, account=''):
     """Opt-out / bounce / reply / unresolved-unknown only (a manual lead may override ordinary dedupe)."""
-    return bool(q("SELECT 1 FROM suppress WHERE value=? AND kind IN ('unsubscribe','bounce','hard_reject','unknown','reply') LIMIT 1",
-                  ((email or '').lower(),)))
+    extra, args = _scope(account)
+    return bool(q("SELECT 1 FROM suppress WHERE value=? AND kind IN ('unsubscribe','bounce','hard_reject','unknown','reply')"
+                  + extra + " LIMIT 1", [(email or '').lower()] + args))
+
+
+def recent_structures(account, limit=10):
+    """Box structures this account proposed recently, newest first (used to keep concepts varied)."""
+    out = []
+    for r in q("SELECT data FROM leads WHERE account=? AND data LIKE '%\"plan\"%' ORDER BY id DESC LIMIT ?", (account, limit)):
+        plan = json.loads(r['data']).get('plan') or {}
+        for k in ('a', 'b'):
+            v = (plan.get(k) or {}).get('structure') or (plan.get(k) or {}).get('name')
+            if v and v not in out:
+                out.append(v)
+    return out
 
 
 # ---------- usage & cost ----------

@@ -210,9 +210,9 @@ def send(acc, msg):
                 pass
 
 
-def save_eml(name, msg):
-    d = config.data_dir() / 'sent'
-    d.mkdir(exist_ok=True)
+def save_eml(name, msg, account=''):
+    d = config.data_dir() / 'accounts' / account / 'sent' if account else config.data_dir() / 'sent'
+    d.mkdir(parents=True, exist_ok=True)
     (d / ('%s.eml' % name)).write_bytes(msg.as_bytes())
 
 

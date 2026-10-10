@@ -362,13 +362,12 @@ class Stage:
             raise AIError('没找到 codex 命令，请先安装并登录 Codex CLI', fatal=True)
         return cli
 
-    @staticmethod
-    def codex_home():
+    def codex_home(self):
         """A private, nearly empty CODEX_HOME: only the ChatGPT login is shared. The user's ~40 skills, hooks, memories
         and config are not loaded into every call (measured: ~26k -> ~4.7k input tokens of fixed overhead)."""
         main = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
-        home = config.data_dir() / 'codex-home'
-        home.mkdir(exist_ok=True)
+        home = config.data_dir() / 'accounts' / (self.account or '_shared') / 'codex-home'  # nothing shared between accounts
+        home.mkdir(parents=True, exist_ok=True)
         (home / 'instructions.md').write_text('You are a concise assistant inside a business app. Follow the user message exactly. '
                                               'When asked for JSON, reply with JSON only.', encoding='utf-8')
         with _CODEX_LOCK:  # several account workers share this folder

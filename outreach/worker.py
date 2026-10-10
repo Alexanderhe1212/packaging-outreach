@@ -9,6 +9,9 @@ from pathlib import Path
 from . import config, llm, mailer, pipeline, store, web
 
 
+TURN = threading.Lock()  # accounts take turns: only one prepares or sends at any moment
+
+
 class AccountWorker(threading.Thread):
     def __init__(self, acc_id):
         super().__init__(daemon=True, name='worker-' + acc_id)
@@ -17,6 +20,7 @@ class AccountWorker(threading.Thread):
         self.error = ''
         self.fails = 0
         self.miss = 0
+        self.idle = 0
         self.wake = threading.Event()
         self.stopped = False
         self.last_inbox = 0
@@ -54,8 +58,13 @@ class AccountWorker(threading.Thread):
                     self.activity = '已暂停'
                     self.sleep(3)
                     continue
-                self.step()
+                self.idle = 0
+                if TURN.locked():
+                    self.activity = '轮到另一个账号，等待中…'
+                with TURN:
+                    self.step(block=False)
                 self.fails = 0
+                self.sleep(self.idle) if self.idle else time.sleep(0.5)  # idle waits happen outside the turn
             except KeyError:  # account removed in settings
                 self.stopped = True
             except (llm.AIError, mailer.MailAuthError) as e:
@@ -82,7 +91,7 @@ class AccountWorker(threading.Thread):
         self.activity = '出错，%d 秒后继续：%s' % (wait, why[:120])
         self.sleep(wait)
 
-    def step(self):
+    def step(self, block=True):
         acc = self.acc
         auto = acc.get('auto_send', True)
         if time.time() - self.last_inbox > 60 * float(config.load().get('inbox_check_minutes', 10)):
@@ -114,7 +123,10 @@ class AccountWorker(threading.Thread):
             self.activity = '不在发送时段（北京时间 %s 点），已备好 %d 封' % ('–'.join(map(str, acc['send_hours_beijing'])), store.count(self.id, 'ready'))
         else:
             self.activity = '下一封 %d 分 %02d 秒后发送' % (wait // 60, wait % 60)
-        self.sleep(min(max(wait, 5), 30))
+        if block:
+            self.sleep(min(max(wait, 5), 30))
+        else:
+            self.idle = min(max(wait, 5), 30)
 
     def limit_reached(self, acc):
         """Per-account cap (0 / empty = unlimited) and an optional cap for all accounts together."""
@@ -150,7 +162,7 @@ class AccountWorker(threading.Thread):
                 if not added:
                     self.miss += 1
                     self.activity = '这一批都是重复或无效客户，换个方向再找'
-                    self.sleep(min(10 * self.miss, 120))
+                    self.idle = min(10 * self.miss, 120)  # wait outside the turn
                 else:
                     self.miss = 0
                 return
@@ -192,8 +204,8 @@ class AccountWorker(threading.Thread):
                 self.activity = '生成 A/B 效果图：' + name
                 store.update(lid, status='imaging')
                 pic, prompt = pipeline.make_image(acc, prof, p, d['plan'], photo)
-                path = config.data_dir() / 'images' / ('%d.jpg' % lid)
-                path.parent.mkdir(exist_ok=True)
+                path = config.data_dir() / 'accounts' / self.id / 'images' / ('%d.jpg' % lid)
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(pic)
                 d['image_prompt'], d['had_reference'] = prompt, photo is not None
                 store.update(lid, image=str(path))
@@ -213,7 +225,7 @@ class AccountWorker(threading.Thread):
             if not lead or lead['status'] != 'ready':
                 return 'not_ready'
             acc = self.acc
-            if store.hard_blocked(lead['email']):
+            if store.hard_blocked(lead['email'], self.id):
                 store.update(lead['id'], status='skipped', error='已退订/退信/回复')
                 return 'skipped'
             self.activity = '发送给 %s <%s>' % (lead['company'], lead['email'])
@@ -228,7 +240,7 @@ class AccountWorker(threading.Thread):
             now = time.time()
             if result in ('sent', 'unknown'):
                 store.update(lead['id'], status=result, sent_at=now, message_id=str(msg['Message-ID']), error=note)
-                mailer.save_eml(lead['id'], msg)
+                mailer.save_eml(lead['id'], msg, self.id)
                 self.schedule_next(acc, now)
             elif result == 'bounced':
                 store.update(lead['id'], status='bounced', error=note)
@@ -256,7 +268,7 @@ class AccountWorker(threading.Thread):
 
     def send_followup(self, lead):
         acc = self.acc
-        if store.hard_blocked(lead['email']):
+        if store.hard_blocked(lead['email'], self.id):
             store.update(lead['id'], followups=1)
             return
         self.activity = '跟进 %s' % lead['company']
@@ -268,5 +280,5 @@ class AccountWorker(threading.Thread):
         store.update(lead['id'], followups=1, followup_at=time.time(), error=note if result != 'sent' else lead['error'])
         key = 'followups_%s_%s' % (self.id, store.today())
         store.put(key, (store.get(key, 0) or 0) + 1)
-        mailer.save_eml('%s-followup' % lead['id'], msg)
+        mailer.save_eml('%s-followup' % lead['id'], msg, self.id)
         self.schedule_next(acc, time.time())

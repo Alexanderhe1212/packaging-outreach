@@ -54,7 +54,7 @@ def discover(account, profile):
               '(no marketplaces, social profiles or link-in-bio pages). %s'
               ) % (b['company'], b['pitch'], profile.get('exclude', 'marketplaces, giant corporations, resellers'),
                    'Use web search to confirm each site is live.' if searching else 'Only list brands you are confident exist, with their real domain.')
-    skip = store.recent_candidate_domains(40)
+    skip = store.recent_candidate_domains(account['id'], 40)
     user = ('Find %d prospects. Focus: %s. Market: %s. Prefer less obvious brands (names starting %s), not the first famous results.\n'
             'Skip these domains: %s') % (n, focus, market, letters, ', '.join(skip) or '(none)')
     data = stage.json(system, user, search=searching, max_tokens=1500)
@@ -79,9 +79,9 @@ def research(account, url, email_hint='', manual=False):
         p = research_with_ai(account, url, email_hint)  # manual lead on a site the crawler cannot read
     if web.root_domain(p['domain']) in own_domains():
         raise web.CrawlError('自家域名')
-    if store.hard_blocked(p['email']):
+    if store.hard_blocked(p['email'], account['id']):
         raise web.CrawlError('该邮箱已退订/退信/回复过，不再发送')
-    if not manual and store.blocked(p['email'], p['domain']):
+    if not manual and store.blocked(p['email'], p['domain'], account['id']):
         raise web.CrawlError('重复客户')
     img, img_url = web.product_image(p.get('product_image_url'), p.get('product_url') or None)
     if img_url:
@@ -140,6 +140,25 @@ OUTPUT = '''Return JSON only:
  "body":"full email body with \\n line breaks, starting with the greeting"}'''
 
 
+def library_items(profile):
+    return [l[2:].strip() for l in profile.get('concept_library', '').splitlines() if l.startswith('- ')]
+
+
+def variety_note(account, profile):
+    """Per-lead nudge (kept out of the cached system prompt): avoid recent structures, suggest two fresh directions."""
+    recent = store.recent_structures(account['id'], 10)
+    low = ' '.join(recent).lower()
+    fresh = [i for i in library_items(profile) if i.split('(')[0].strip().lower()[:18] not in low] or library_items(profile)
+    seeds = random.sample(fresh, min(2, len(fresh)))
+    note = '\nVARIETY: '
+    if recent:
+        note += 'This sender recently proposed: %s. Do not repeat those structures. ' % '; '.join(recent[:8])
+    if seeds:
+        note += 'Fresh directions worth considering for this product: %s. ' % ' / '.join(seeds)
+    return note + ('A and B must be different structure families. Make at least one concept genuinely new and memorable for this '
+                   'product (an unexpected opening, reveal, shape or reuse idea) while staying practical to produce.')
+
+
 def writer_prompts(account, profile, p, has_photo):
     b = brief(account, profile)
     noun = profile.get('concept_noun', 'packaging')
@@ -156,7 +175,8 @@ def writer_prompts(account, profile, p, has_photo):
                            extra=profile.get('email_extra', '')),
         OUTPUT])
     user = ('The attached photo is their real product. ' if has_photo else 'No photo available; rely on the facts. ') + \
-        'Design two %s concepts for it and write the email.\nPRODUCT RESEARCH (from their website): %s' % (noun, facts_for_prompt(p))
+        'Design two %s concepts for it and write the email.\nPRODUCT RESEARCH (from their website): %s' % (noun, facts_for_prompt(p)) + \
+        variety_note(account, profile)
     return system, user
 
 

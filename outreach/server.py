@@ -82,7 +82,7 @@ def api_settings_get(_q):
     sec = config.secrets()
     return dict(connections=cfg['connections'], stages=cfg['stages'], accounts=cfg['accounts'],
                 api_presets=cfg['api_presets'], mail_presets=cfg['mail_presets'], inbox_check_minutes=cfg.get('inbox_check_minutes', 10),
-                daily_limit_total=int(cfg.get('daily_limit_total') or 0),
+                daily_limit_total=int(cfg.get('daily_limit_total') or 0), cross_account_dedupe=bool(cfg.get('cross_account_dedupe', False)),
                 has_key={k: bool(sec['keys'].get(k)) for k in cfg['connections']},
                 has_password={a['id']: bool(sec['passwords'].get(a['id'])) or bool(a.get('keychain_service')) for a in cfg['accounts']},
                 profiles=config.profiles(), version=VERSION)
@@ -107,7 +107,7 @@ def api_add(data):
         if '@' in u and '.' in u and ' ' not in u and '/' not in u:  # a bare email: website = its domain
             email, u = u.lower(), u.split('@')[1]
         dom = web.host(u)
-        if store.blocked(email, dom) and not data.get('force'):
+        if store.blocked(email, dom, aid) and not data.get('force'):
             skipped.append(dom)
             continue
         ids.append(store.add_lead(aid, 'queued', 'manual', company=dom, domain=dom, email=email,
@@ -155,7 +155,7 @@ def api_redo(data):
 
 
 def api_settings_post(data):
-    patch = {k: data[k] for k in ('connections', 'stages', 'inbox_check_minutes', 'daily_limit_total') if k in data}
+    patch = {k: data[k] for k in ('connections', 'stages', 'inbox_check_minutes', 'daily_limit_total', 'cross_account_dedupe') if k in data}
     if 'accounts' in data:
         seen = set()
         for a in data['accounts']:
