@@ -56,7 +56,8 @@ def smtp_connect(acc):
 
 
 def imap_connect(acc):
-    c = imaplib.IMAP4_SSL(acc['imap']['host'], int(acc['imap'].get('port', 993)), ssl_context=ssl.create_default_context())
+    c = imaplib.IMAP4_SSL(acc['imap']['host'], int(acc['imap'].get('port', 993)), ssl_context=ssl.create_default_context(),
+                          timeout=30)
     try:
         c.login(acc.get('login') or acc['sender'], password(acc))
     except imaplib.IMAP4.error:
@@ -263,10 +264,22 @@ def sync_inbox(acc):
         last = int(store.get('imap_uid_' + aid, 0) or 0)
         if last:
             typ, data = c.uid('search', None, 'UID', '%d:*' % (last + 1))
-        else:
-            typ, data = c.uid('search', None, 'SINCE', (datetime.now() - timedelta(days=14)).strftime('%d-%b-%Y'))
-        uids = [int(u) for u in (data[0].split() if typ == 'OK' and data and data[0] else []) if int(u) > last]
-        for uid in uids[-300:]:
+        else:  # first sync: only mail that arrived after this app's first send
+            first = store.q('SELECT min(sent_at) t FROM leads WHERE account=? AND sent_at IS NOT NULL', (aid,), one=True)['t'] or time.time()
+            typ, data = c.uid('search', None, 'SINCE', (datetime.fromtimestamp(first) - timedelta(days=1)).strftime('%d-%b-%Y'))
+        uids = [int(u) for u in (data[0].split() if typ == 'OK' and data and data[0] else []) if int(u) > last][-500:]
+        wanted = []
+        for i in range(0, len(uids), 100):  # headers only, 100 at a time; bodies only for replies and bounces
+            typ, parts = c.uid('fetch', ','.join(map(str, uids[i:i + 100])), '(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])')
+            for part in parts or []:
+                if not isinstance(part, tuple):
+                    continue
+                m = re.search(rb'UID (\d+)', part[0])
+                head = BytesParser(policy=email.policy.default).parsebytes(part[1])
+                frm, subj = str(head.get('From', '')), str(head.get('Subject', ''))
+                if m and (parseaddr(frm)[1].lower() in sent or BOUNCE_FROM.search(frm) or BOUNCE_SUBJ.search(subj)):
+                    wanted.append(int(m.group(1)))
+        for uid in wanted:
             typ, parts = c.uid('fetch', str(uid), '(BODY.PEEK[]<0.200000>)')
             raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), None)
             if not raw:

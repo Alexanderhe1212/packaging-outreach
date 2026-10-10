@@ -59,14 +59,19 @@ class AccountWorker(threading.Thread):
                     self.sleep(3)
                     continue
                 self.idle = 0
+                self.check_inbox()
                 if TURN.locked():
                     self.activity = '轮到另一个账号，等待中…'
                 with TURN:
                     self.step(block=False)
                 self.fails = 0
                 self.sleep(self.idle) if self.idle else time.sleep(0.5)  # idle waits happen outside the turn
-            except KeyError:  # account removed in settings
-                self.stopped = True
+            except KeyError as e:
+                if not any(a['id'] == self.id for a in config.load()['accounts']):
+                    self.stopped = True  # account removed in settings
+                else:
+                    traceback.print_exc()
+                    self.backoff('KeyError: %s' % e)
             except (llm.AIError, mailer.MailAuthError) as e:
                 if getattr(e, 'setup', False):
                     self.error = ''
@@ -91,19 +96,22 @@ class AccountWorker(threading.Thread):
         self.activity = '出错，%d 秒后继续：%s' % (wait, why[:120])
         self.sleep(wait)
 
+    def check_inbox(self):
+        """Own mailbox only, so it runs outside the shared turn."""
+        if time.time() - self.last_inbox < 60 * float(config.load().get('inbox_check_minutes', 10)):
+            return
+        self.last_inbox = time.time()
+        self.activity = '检查收件箱（回复 / 退订 / 退信）…'
+        try:
+            mailer.sync_inbox(self.acc)
+        except mailer.MailAuthError:
+            raise
+        except Exception as e:
+            self.error = '收件箱检查失败：%s' % type(e).__name__
+
     def step(self, block=True):
         acc = self.acc
         auto = acc.get('auto_send', True)
-        if time.time() - self.last_inbox > 60 * float(config.load().get('inbox_check_minutes', 10)):
-            self.last_inbox = time.time()
-            self.activity = '检查收件箱（回复 / 退订 / 退信）…'
-            try:
-                mailer.sync_inbox(acc)
-            except mailer.MailAuthError:
-                raise
-            except Exception as e:
-                self.error = '收件箱检查失败：%s' % type(e).__name__
-
         wait = self.send_wait(acc)
         if auto and wait <= 0:
             ready = store.next_lead(self.id, ('ready',))
