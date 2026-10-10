@@ -1,0 +1,31 @@
+{
+  "id": "packaging",
+  "name": "定制包装（礼盒 / 彩盒 / 内托）",
+  "concept_noun": "packaging",
+  "offer": "We develop custom rigid gift boxes, folding cartons, fitted inserts and matching paper bags, from concept and physical sample to bulk order, shipped worldwide.",
+  "ideal_customers": [
+    "skincare, cosmetics, fragrance, essential oil, soap and haircare brands",
+    "candle makers, home fragrance and home decor brands",
+    "jewelry, watches, scarves and fashion accessory brands",
+    "tea, coffee, chocolate, confectionery and specialty food gift brands",
+    "headphones, wearables, phone accessories and compact consumer electronics brands",
+    "stationery, museum shop, book gift set and corporate gift businesses"
+  ],
+  "markets": "USA, Canada, UK, Ireland, Germany, France, Netherlands, Nordics, Australia, New Zealand",
+  "exclude": "marketplaces (Amazon/Etsy shops), giant corporations, resellers, packaging/printing companies",
+  "concept_library": "Structures (A and B must differ in opening style; pick what genuinely suits THIS product):\n- magnetic flap rigid box (book-style lid, hidden magnets)\n- lift-off lid rigid box (separate lid and base)\n- shoulder-neck rigid box (lid sits on a visible inner collar)\n- drawer / slide box (tray slides out of a sleeve, ribbon pull)\n- hinged keepsake box (attached lid, jewellery style)\n- round / cylinder tube box (bottles, candles, rolled scarves)\n- double-door rigid box (dramatic reveal for sets)\n- window box (clear die-cut window)\n- folding carton, tuck end or auto-lock bottom (economical, flat-shipped)\n- printed corrugated mailer box (DTC shipping, subscriptions)\n- sleeve + tray carton\nInserts: EVA with fabric cover, molded pulp, paperboard die-cut, satin/velvet cradle, card dividers for sets.\nFinishes: soft-touch lamination, textured paper, hot-foil, emboss/deboss, spot UV, ribbon pull.",
+  "design_guidance": "Choose structures by product shape, fragility, unit count and how it is gifted, not by price. Match the customer's brand colours and mood from the photo and site. Each concept needs a fitted insert holding the product securely. Soft goods are folded plausibly.",
+  "email_extra": "If you propose a folding carton or mailer box you may mention MOQ 1,000 pcs; never give prices, lead times, certifications or engineering approval. Concepts are for discussion and need sample validation.",
+  "subject_examples": ["two box ideas for your Rosewood bangle", "Ritual Candle - gift box concepts"],
+  "cta_examples": ["If either fits, just reply A or B with a rough quantity and I'll send a unit price and sample timeline."],
+  "image": {
+    "enabled": true,
+    "prompt": "Photorealistic premium packaging presentation, landscape, two packaging concepts side by side for the same product.\n\nPRODUCT (keep it exactly like the reference photo - same shape, colours, label, proportions; do not redesign it): {product}. {count} shown inside each package.\n\nLEFT - concept \"A\": {a_structure}. {a_visual}\nRIGHT - concept \"B\": {b_structure}. {b_visual}\n\nBoth packages open at a three-quarter angle so the fitted insert holding the product is clearly visible; lids, sleeves and drawers physically consistent with their bases. The brand name \"{brand}\" appears once on each package as subtle foil or emboss, spelled exactly. No other words or logos on the packaging.\n\nSmall elegant serif letters \"A\" and \"B\" near the top of each half. Small footer text centred at the bottom: \"{footer}\".\n\nScene: {scene}. Soft natural daylight, gentle realistic shadows, high-end catalogue photography, clean composition, both concepts equally sized and fully in frame.",
+    "footer": "Packaging concept for discussion"
+  },
+  "followup": {
+    "enabled": false,
+    "days": 5,
+    "body": "Hi {brand} team,\n\nJust floating this back to the top of your inbox - happy to adapt either concept for {product}, or send a physical sample so you can feel the materials.\n\nWould A or B be worth a quick quote?"
+  }
+}

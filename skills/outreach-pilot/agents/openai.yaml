@@ -1,0 +1,4 @@
+interface:
+  display_name: "OutreachPilot"
+  short_description: "Run AI cold outreach across several mailboxes with per-email cost tracking"
+  default_prompt: "Use $outreach-pilot to check my outreach status and today's costs."

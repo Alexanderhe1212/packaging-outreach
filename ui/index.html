@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OutreachPilot</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--panel2:#f0f2f5;--line:#e3e6ea;--text:#16191d;--muted:#6b7280;--accent:#0f766e;--accent2:#14b8a6;--warn:#b45309;--bad:#b91c1c;--good:#15803d;--blue:#1d4ed8;--shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04)}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1013;--panel:#16191e;--panel2:#1d2127;--line:#2a2f37;--text:#e8eaed;--muted:#9aa1ab;--accent:#2dd4bf;--accent2:#14b8a6;--warn:#f59e0b;--bad:#f87171;--good:#4ade80;--blue:#60a5fa;--shadow:none}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (prefers-color-scheme:dark){button.primary{color:#062723}}
+button.ghost{background:transparent;border-color:transparent}
+button.small{padding:3px 9px;font-size:12px}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+input,select,textarea{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
+textarea{resize:vertical;min-height:70px;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--accent) 35%,transparent);border-color:var(--accent)}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:12px 22px;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.logo i{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent2),#6366f1);display:grid;place-items:center;color:#fff;font-style:normal;font-size:15px}
+.ver{font-size:11px;color:var(--muted);font-weight:400}
+.spacer{flex:1}
+main{padding:18px 22px 60px;max-width:1440px;margin:0 auto}
+.banner{background:color-mix(in srgb,var(--warn) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);padding:10px 14px;border-radius:10px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
+.acc-head{display:flex;align-items:center;gap:10px}
+.acc-name{font-weight:700;font-size:16px}
+.muted{color:var(--muted)}
+.pill{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--panel2);color:var(--muted)}
+.pill.run{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
+.activity{margin:10px 0;font-size:13px;color:var(--muted);min-height:20px;display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.dot.live{background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}100%{box-shadow:0 0 0 8px transparent}}
+.err{color:var(--bad);font-size:12px;margin-top:-4px;margin-bottom:8px;word-break:break-word}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0 12px}
+.kpi{background:var(--panel2);border-radius:10px;padding:8px 10px}
+.kpi b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11px;color:var(--muted)}
+.bar{height:6px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.strip{display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin:16px 0}
+.strip div b{font-size:20px;font-variant-numeric:tabular-nums}
+.strip div span{display:block;font-size:12px;color:var(--muted)}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs button{border:none;background:transparent;color:var(--muted);border-radius:8px}
+.tabs button.on{background:var(--panel2);color:var(--text);font-weight:600}
+.tabs button em{font-style:normal;font-size:11px;margin-left:4px;color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:12px;color:var(--muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--panel2)}
+tr.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)!important}
+.st{font-size:12px;padding:2px 8px;border-radius:6px;white-space:nowrap;background:var(--panel2)}
+.st.ready{color:var(--blue);background:color-mix(in srgb,var(--blue) 12%,transparent)}
+.st.sent{color:var(--good);background:color-mix(in srgb,var(--good) 12%,transparent)}
+.st.replied{color:#fff;background:var(--accent)}
+.st.failed,.st.bounced{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.st.unknown,.st.unsubscribed{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.st.work{color:var(--accent)}
+.co b{display:block}
+.co small{color:var(--muted)}
+.subj{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:20;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s;box-shadow:-10px 0 30px rgba(0,0,0,.12)}
+.drawer.open{transform:none}
+.dhead{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.dbody{flex:1;overflow:auto;padding:16px 18px}
+iframe{width:100%;height:560px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.facts{font-size:13px;display:grid;grid-template-columns:110px 1fr;gap:4px 12px;margin:12px 0}
+.facts dt{color:var(--muted)}
+.facts dd{margin:0;word-break:break-word}
+.reply{white-space:pre-wrap;background:color-mix(in srgb,var(--accent) 8%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:10px;padding:12px;margin-bottom:12px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:30;display:none;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow:auto}
+.modal.open{display:flex}
+.mbox{background:var(--panel);border-radius:16px;width:min(980px,100%);border:1px solid var(--line);box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.mhead{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);gap:10px}
+.mbody{padding:16px 18px;max-height:74vh;overflow:auto}
+.mfoot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px}
+.form label{font-size:12px;color:var(--muted);display:block}
+.form label > *{margin-top:4px}
+.form .wide{grid-column:1/-1}
+fieldset{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px}
+legend{padding:0 6px;font-weight:600}
+.hint{font-size:12px;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:10px;z-index:50;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw}
+.toast.show{opacity:1}
+.stage{display:grid;grid-template-columns:120px 1fr 1fr 1.4fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)}
+.stage:last-child{border:none}
+.chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)}
+.chk input{width:auto}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (max-width:720px){header{padding:10px 14px}main{padding:14px}.kpis{grid-template-columns:repeat(2,1fr)}.stage{grid-template-columns:1fr}.subj,.hide-sm{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><i>✈</i>OutreachPilot <span class="ver" id="ver"></span></div>
+  <div class="spacer"></div>
+  <button class="primary" onclick="ctl('start')">▶ 全部开始</button>
+  <button onclick="ctl('pause')">⏸ 全部暂停</button>
+  <button onclick="openAdd()">＋ 添加客户</button>
+  <button onclick="openSettings()">⚙ 设置</button>
+  <button class="ghost" title="退出后台服务" onclick="quitApp()">⏻</button>
+</header>
+<main>
+  <div id="banner"></div>
+  <div class="grid" id="accounts"></div>
+  <div class="strip" id="strip"></div>
+  <div class="card" style="padding:10px 6px">
+    <div class="row" style="padding:0 8px 8px;justify-content:space-between">
+      <div class="tabs" id="tabs"></div>
+      <div class="row" style="flex-wrap:nowrap">
+        <select id="facc" onchange="loadLeads(true)" style="width:auto"></select>
+        <input id="fq" placeholder="搜索公司 / 邮箱 / 主题" oninput="clearTimeout(window._q);window._q=setTimeout(()=>loadLeads(true),300)" style="width:220px">
+      </div>
+    </div>
+    <table><thead><tr><th>客户</th><th class="hide-sm">邮箱</th><th class="subj">主题</th><th>状态</th><th class="hide-sm">成本</th><th>更新</th></tr></thead>
+      <tbody id="leads"></tbody></table>
+    <div class="row" style="justify-content:center;padding:10px" id="pager"></div>
+  </div>
+</main>
+
+<div class="drawer" id="drawer"><div class="dhead"><b id="dtitle" style="flex:1"></b><button class="ghost" onclick="closeDrawer()">✕</button></div><div class="dbody" id="dbody"></div></div>
+
+<div class="modal" id="addModal"><div class="mbox" style="width:min(620px,100%)">
+  <div class="mhead"><b style="flex:1">添加客户</b><button class="ghost" onclick="closeModal('addModal')">✕</button></div>
+  <div class="mbody"><div class="form">
+    <label>用哪个账号开发<select id="addAcc"></select></label>
+    <label>邮箱（可选，只加一家时有效）<input id="addEmail" placeholder="hello@brand.com"></label>
+    <label class="wide">客户官网或邮箱，每行一个（可一次粘贴很多）<textarea id="addUrls" rows="7" placeholder="https://brand.com&#10;anotherbrand.co.uk&#10;hello@thirdbrand.com"></textarea></label>
+    <label class="chk wide"><input type="checkbox" id="addForce"> 即使联系过也添加（不会跳过退订 / 退信）</label>
+  </div><p class="hint">系统会读取官网的公开邮箱和主推产品，写邮件、生成 A/B 图，然后按账号设置发送或等你审核。</p></div>
+  <div class="mfoot"><button onclick="closeModal('addModal')">取消</button><button class="primary" onclick="doAdd()">添加</button></div>
+</div></div>
+
+<div class="modal" id="setModal"><div class="mbox">
+  <div class="mhead"><b>设置</b><div class="tabs" id="stabs" style="margin-left:14px"></div><div class="spacer"></div><button class="ghost" onclick="closeModal('setModal')">✕</button></div>
+  <div class="mbody" id="sbody"></div>
+  <div class="mfoot"><span class="hint" style="flex:1">密钥只保存在本机 <code id="ddir"></code>（权限 600），不会上传 GitHub。</span><button onclick="closeModal('setModal')">关闭</button><button class="primary" id="saveBtn" onclick="saveSettings()">保存</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s), E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ST={queued:'排队中',researching:'读官网',writing:'写邮件',imaging:'生成图',ready:'待发送',sent:'已发送',unknown:'结果未知',replied:'已回复',failed:'失败',skipped:'已跳过',bounced:'退信',unsubscribed:'退订'};
+const TABS=[['','全部'],['queued,researching,writing,imaging','准备中'],['ready','待发送'],['sent,unknown','已发送'],['replied','已回复'],['failed,skipped,bounced,unsubscribed','失败/退订']];
+let S={state:null,status:'',offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
+async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j}
+function toast(m,ms=2600){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms)}
+const ago=ts=>{if(!ts)return'';const s=Date.now()/1000-ts;return s<60?'刚刚':s<3600?Math.floor(s/60)+' 分钟前':s<86400?Math.floor(s/3600)+' 小时前':new Date(ts*1000).toLocaleDateString()};
+const money=v=>v?'$'+(v<0.01?v.toFixed(4):v.toFixed(3)):'—';
+
+async function ctl(what,account){try{await api('/api/'+what,account?{account}:{});toast(what==='start'?'已开始':'已暂停');refresh()}catch(e){toast(e.message)}}
+async function quitApp(){if(!confirm('退出后台服务？发送和准备都会停止，下次打开从原处继续。'))return;await api('/api/quit',{});document.body.innerHTML='<div class="empty">OutreachPilot 已退出，可以关闭这个窗口。</div>'}
+
+async function refresh(){
+  try{S.state=await api('/api/state')}catch(e){$('#banner').innerHTML='<div class="banner">后台服务没有响应：'+E(e.message)+'</div>';return}
+  const st=S.state;$('#ver').textContent='v'+st.version;$('#ddir').textContent=st.data_dir;
+  let b='';if(!st.api_ready)b+='<div class="banner">第一步：点右上角 <b>⚙ 设置 → AI 接口</b>，选择服务商并填写 API Key，点「测试」通过后保存。</div>';
+  if((st.legacy_running||[]).length)b+=`<div class="banner">⚠ 检测到旧版开发信程序仍在运行（端口 ${st.legacy_running.join(', ')}）。为避免同一个邮箱被两套程序同时发信，请先关闭旧程序的终端窗口，再点「开始」。</div>`;
+  if(!st.accounts.length)b+='<div class="banner">还没有发信账号：在 <b>⚙ 设置 → 账号</b> 里添加。</div>';
+  $('#banner').innerHTML=b;
+  $('#accounts').innerHTML=st.accounts.map(a=>{const s=a.stats,lim=a.daily_limit||40,pct=Math.min(100,100*(s.sent_today||0)/lim);
+    const working=['queued','researching','writing','imaging'].reduce((n,k)=>n+(s[k]||0),0);
+    return `<div class="card"><div class="acc-head"><span class="acc-name">${E(a.name)}</span><span class="pill ${a.paused?'':'run'}">${a.paused?'已暂停':'运行中'}</span>
+      <span class="muted" style="font-size:12px">${E(a.sender)}</span><div class="spacer"></div>
+      ${a.paused?`<button class="primary small" onclick="ctl('start','${a.id}')">开始</button>`:`<button class="small" onclick="ctl('pause','${a.id}')">暂停</button>`}</div>
+      <div class="activity"><span class="dot ${a.paused?'':'live'}"></span>${E(a.activity||'—')}</div>${a.error?`<div class="err">${E(a.error)}</div>`:''}
+      <div class="kpis"><div class="kpi"><b>${s.sent_today||0}<small class="muted" style="font-size:12px">/${lim}</small></b><span>今日已发</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+      <div class="kpi"><b>${s.ready||0}</b><span>待发送${a.auto_send?'':'（审核）'}</span></div><div class="kpi"><b>${s.replied||0}</b><span>已回复</span></div>
+      <div class="kpi"><b>${money(s.cost_today)}</b><span>今日 AI 费用</span></div></div>
+      <div class="row muted" style="font-size:12px;gap:14px"><span>准备中 ${working}</span><span>候选池 ${s.candidates||0}</span><span>累计发送 ${(s.sent||0)+(s.unknown||0)+(s.replied||0)}</span><span>${Math.round((s.tokens_today||0)/1000)}k tokens 今日</span>
+      <div class="spacer"></div><button class="small" onclick="openAdd('${a.id}')">＋ 添加客户</button></div></div>`}).join('');
+  const sel=$('#facc'),cur=sel.value;sel.innerHTML='<option value="">全部账号</option>'+st.accounts.map(a=>`<option value="${a.id}">${E(a.name)}</option>`).join('');sel.value=cur;
+}
+
+async function loadUsage(){
+  try{const u=await api('/api/usage?days=7');const tot=u.rows.reduce((t,r)=>({c:t.c+r.cost,i:t.i+r.input+r.output,img:t.img+r.images,calls:t.calls+r.calls}),{c:0,i:0,img:0,calls:0});
+    const pe=u.per_email||{};
+    $('#strip').innerHTML=`<div><b>${pe.tokens?Math.round(pe.tokens).toLocaleString():'—'}</b><span>每封邮件平均 tokens（7 天）</span></div>
+      <div><b>${pe.cost?money(pe.cost):'—'}</b><span>每封邮件平均成本（含生图）</span></div>
+      <div><b>${money(tot.c)}</b><span>近 7 天 AI 费用（估算）</span></div><div><b>${tot.calls}</b><span>近 7 天 AI 调用次数</span></div><div><b>${tot.img}</b><span>近 7 天效果图</span></div>`}catch(e){}
+}
+
+async function loadLeads(reset){
+  if(reset)S.offset=0;
+  const q=new URLSearchParams({status:S.status,account:$('#facc').value,q:$('#fq').value,limit:S.limit,offset:S.offset});
+  const r=await api('/api/leads?'+q);
+  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="${S.status===k?'on':''}" onclick="S.status='${k}';loadLeads(true)">${l}</button>`).join('');
+  $('#leads').innerHTML=r.items.length?r.items.map(l=>{const work=['queued','researching','writing','imaging'].includes(l.status);
+    return `<tr onclick="openLead(${l.id})" class="${S.lead===l.id?'sel':''}"><td class="co"><b>${E(l.company||l.domain)}</b><small>${E(l.account)} · ${E(l.domain)}</small></td>
+    <td class="hide-sm">${E(l.email)}</td><td class="subj" title="${E(l.subject)}">${E(l.subject)||'<span class="muted">—</span>'}</td>
+    <td><span class="st ${work?'work':l.status}">${work?'<span class="spin" style="display:inline-block;vertical-align:-2px;margin-right:4px;width:10px;height:10px"></span>':''}${ST[l.status]||l.status}</span>${l.followups?' <span class="pill">已跟进</span>':''}${l.error&&l.status==='failed'?`<div class="err" style="margin:4px 0 0">${E(l.error).slice(0,80)}</div>`:''}</td>
+    <td class="hide-sm muted">${money(l.cost)}</td><td class="muted" style="white-space:nowrap">${ago(l.reply_at||l.sent_at||l.updated_at)}</td></tr>`}).join(''):'<tr><td colspan="6" class="empty">还没有记录。点「开始」后，系统会自动寻找客户。</td></tr>';
+  const pages=Math.ceil(r.total/S.limit),page=S.offset/S.limit+1;
+  $('#pager').innerHTML=pages>1?`<button class="small" ${page<=1?'disabled':''} onclick="S.offset-=S.limit;loadLeads()">上一页</button><span class="muted">${page} / ${pages}（共 ${r.total}）</span><button class="small" ${page>=pages?'disabled':''} onclick="S.offset+=S.limit;loadLeads()">下一页</button>`:`<span class="muted" style="font-size:12px">共 ${r.total} 条</span>`;
+}
+
+async function openLead(id){
+  S.lead=id;S.editing=false;const l=await api('/api/lead/'+id),p=(l.data||{}).prospect||{},plan=(l.data||{}).plan||{};
+  $('#dtitle').innerHTML=`${E(l.company||l.domain)} <span class="st ${l.status}">${ST[l.status]||l.status}</span>`;
+  const canSend=['ready','failed'].includes(l.status)&&l.subject,locked=['sent','unknown','replied','imaging','writing','researching'].includes(l.status);
+  const facts=[['账号',l.account],['邮箱',`${E(l.email)} <span class="muted">${p.email_source&&p.email_source.startsWith('http')?`· <a href="${E(p.email_source)}" target="_blank">来源页</a>`:''}</span>`],
+    ['官网',p.website?`<a href="${E(p.website)}" target="_blank">${E(p.website)}</a>`:''],['国家',p.country],['产品',p.product_url?`<a href="${E(p.product_url)}" target="_blank">${E(p.product_name)}</a>`:E(p.product_name)],
+    ['产品信息',E([p.product_price,...(p.product_facts||[])].filter(Boolean).join(' · '))],['A 方案',E((plan.a||{}).name)],['B 方案',E((plan.b||{}).name)],
+    ['AI 成本',`${money(l.cost)} · ${(l.tokens||0).toLocaleString()} tokens · ${(l.usage||[]).map(u=>E(u.stage)).join(' + ')}`],['错误',l.error?`<span class="err">${E(l.error)}</span>`:'']].filter(f=>f[1]);
+  $('#dbody').innerHTML=`${l.reply_excerpt?`<div class="reply"><b>客户回复：</b>\n${E(l.reply_excerpt)}</div>`:''}
+    <div class="row" style="margin-bottom:12px">${canSend?`<button class="primary" onclick="leadAct('send',${id})">✉ 立即发送</button>`:''}
+    ${!locked&&l.subject?`<button onclick="editLead(${id})">✎ 修改文字</button>`:''}${!locked&&plan.a?`<button onclick="leadAct('redo',${id},'image')">↻ 重做图片</button>`:''}
+    ${!locked?`<button onclick="leadAct('redo',${id},'all')">↻ 重写邮件+图片</button>`:''}${!['sent','unknown','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
+    <div id="editArea"></div>${l.subject?`<iframe src="/preview/${id}?t=${Date.now()}"></iframe>`:'<div class="empty">邮件还在准备中…</div>'}<dl class="facts">${facts.map(f=>`<dt>${f[0]}</dt><dd>${f[1]}</dd>`).join('')}</dl>`;
+  $('#drawer').classList.add('open');S._lead=l;loadLeads();
+}
+function closeDrawer(){$('#drawer').classList.remove('open');S.lead=null;S.editing=false}
+function editLead(id){S.editing=true;const l=S._lead;$('#editArea').innerHTML=`<div class="form" style="margin-bottom:12px"><label class="wide">主题<input id="eSub" value="${E(l.subject)}"></label><label class="wide">正文<textarea id="eBody" rows="12">${E(l.body)}</textarea></label></div><div class="row" style="margin-bottom:12px"><button class="primary" onclick="saveEdit(${id})">保存修改</button><button onclick="openLead(${id})">取消</button></div>`}
+async function saveEdit(id){try{await api('/api/edit',{id,subject:$('#eSub').value,body:$('#eBody').value});toast('已保存');openLead(id)}catch(e){toast(e.message)}}
+async function leadAct(act,id,what){
+  if(act==='send'&&!confirm('现在发送这封邮件？'))return;
+  try{const r=await api('/api/'+act,{id,what});toast(act==='send'?('发送结果：'+({sent:'已发送',unknown:'服务器结果未知（不会自动重发）',bounced:'退信',retry:'连接失败，稍后重试'}[r.result]||r.result)):act==='skip'?'已跳过':'已加入重做队列');openLead(id);refresh()}catch(e){toast(e.message)}
+}
+
+function openAdd(acc){const st=S.state||{accounts:[]};$('#addAcc').innerHTML=st.accounts.map(a=>`<option value="${a.id}">${E(a.name)} · ${E(a.sender)}</option>`).join('');if(acc)$('#addAcc').value=acc;$('#addModal').classList.add('open');setTimeout(()=>$('#addUrls').focus(),50)}
+function closeModal(id){$('#'+id).classList.remove('open')}
+async function doAdd(){try{const r=await api('/api/add',{account:$('#addAcc').value,urls:$('#addUrls').value,email:$('#addEmail').value,force:$('#addForce').checked});
+  toast(`已添加 ${r.ids.length} 家`+(r.skipped.length?`，跳过已联系 ${r.skipped.length} 家`:''),4000);$('#addUrls').value='';$('#addEmail').value='';closeModal('addModal');loadLeads(true)}catch(e){toast(e.message)}}
+
+/* ---------------- settings ---------------- */
+const STABS=[['api','AI 接口'],['acc','账号'],['prof','产品方案'],['data','数据与更新']];
+async function openSettings(tab){S.settings=await api('/api/settings');S.keys={};S.pw={};if(tab)S.stab=tab;$('#setModal').classList.add('open');renderSettings()}
+function renderSettings(){
+  $('#stabs').innerHTML=STABS.map(([k,l])=>`<button class="${S.stab===k?'on':''}" onclick="collect();S.stab='${k}';renderSettings()">${l}</button>`).join('');
+  $('#saveBtn').style.display=S.stab==='data'?'none':'';
+  ({api:renderApi,acc:renderAcc,prof:renderProf,data:renderData})[S.stab]();
+}
+const opt=(v,l,cur)=>`<option value="${E(v)}" ${String(v)===String(cur)?'selected':''}>${E(l)}</option>`;
+function renderApi(){
+  const st=S.settings,P=st.api_presets;
+  let h=`<p class="hint" style="margin-top:0">填好 API Key 即可使用。一个连接可以同时用于三个阶段；也可以混搭，例如 DeepSeek 写邮件 + OpenAI 生图。中转站选「中转 / 自定义」，填对方给的 Base URL。</p>`;
+  h+=Object.entries(st.connections).map(([name,c])=>{const pr=P[c.preset]||{};return `<fieldset><legend>连接：${E(name)}</legend><div class="form">
+    <label>服务商<select data-c="${name}" data-k="preset" onchange="presetChange('${name}',this.value)">${Object.entries(P).map(([k,p])=>opt(k,p.label,c.preset)).join('')}</select></label>
+    <label>Base URL<input data-c="${name}" data-k="base_url" value="${E(c.base_url||'')}" placeholder="${E(pr.base_url||'https://你的中转地址/v1')}"></label>
+    ${pr.nokey?'<label>API Key<input disabled placeholder="使用本机 Codex 登录，无需填写"></label>':`<label>API Key ${pr.key_url?`<a href="${pr.key_url}" target="_blank" style="float:right">获取 Key ↗</a>`:''}<input type="password" data-key="${name}" placeholder="${st.has_key[name]?'已保存（留空则不修改）':'粘贴 API Key'}" value="${E(S.keys[name]||'')}"></label>`}
+    <div class="row wide"><button class="small" onclick="testApi('${name}')">测试连接</button><span class="hint" id="t_${name}">${pr.search?'✓ 支持联网搜索找客户':'不支持联网搜索：靠模型知识给候选，再由官网抓取核实'} · ${pr.image?'✓ 可生图':'✗ 不能生图'}</span><div class="spacer"></div>${name!=='main'?`<button class="small danger" onclick="delConn('${name}')">删除</button>`:''}</div></div></fieldset>`}).join('');
+  h+=`<button class="small" onclick="addConn()">＋ 添加连接（混用多家服务商）</button>`;
+  const cs=Object.keys(st.connections),S2=st.stages;
+  const models=(k,img)=>{const pr=P[(st.connections[S2[k].connection]||{}).preset]||{};return (img?pr.image_models:pr.models)||[]};
+  h+=`<fieldset style="margin-top:16px"><legend>三个阶段用什么模型</legend>
+   ${[['discover','① 找客户','每次给一批候选（默认 6 家），之后官网抓取不花 token'],['write','② 写邮件 + A/B','每个客户 1 次，产品图按 512px 低精度发送'],['image','③ 效果图','每个客户 1 张，用真实产品图做参考']].map(([k,l,d])=>`
+   <div class="stage"><div><b>${l}</b><div class="hint">${d}</div></div>
+    <label class="hint">连接<select data-s="${k}" data-k="connection" onchange="collect();renderSettings()">${cs.map(c=>opt(c,c,S2[k].connection)).join('')}</select></label>
+    <label class="hint">模型<input data-s="${k}" data-k="model" value="${E(S2[k].model)}" list="ml_${k}"><datalist id="ml_${k}">${models(k,k==='image').map(m=>`<option value="${E(m)}">`).join('')}</datalist></label>
+    <div class="row">${k==='discover'?`<label class="chk"><input type="checkbox" data-s="discover" data-k="web_search" ${S2.discover.web_search!==false?'checked':''}> 联网搜索</label><label class="hint">每批<input type="number" min="3" max="15" data-s="discover" data-k="batch" value="${S2.discover.batch||6}" style="width:64px"></label>`:''}
+     ${k==='write'?`<label class="hint">推理强度<select data-s="write" data-k="effort">${['','minimal','low','medium','high'].map(v=>opt(v,v||'默认',S2.write.effort||'')).join('')}</select></label><label class="chk"><input type="checkbox" data-s="write" data-k="vision" ${S2.write.vision!==false?'checked':''}> 看产品图</label>`:''}
+     ${k==='image'?`<label class="hint">尺寸<select data-s="image" data-k="size">${['1536x1024','1024x1024','1792x1024'].map(v=>opt(v,v,S2.image.size)).join('')}</select></label><label class="hint">质量<select data-s="image" data-k="quality">${[['low','低 ≈$0.02'],['medium','中 ≈$0.06'],['high','高 ≈$0.25']].map(([v,l])=>opt(v,l,S2.image.quality)).join('')}</select></label>`:''}</div></div>`).join('')}</fieldset>`;
+  $('#sbody').innerHTML=h;
+}
+function presetChange(name,v){collect();const c=S.settings.connections[name],p=S.settings.api_presets[v];c.preset=v;c.kind=p.kind;c.base_url=p.base_url;
+  Object.entries(S.settings.stages).forEach(([k,s])=>{if(s.connection===name){if(k==='image'){if(p.image_models)s.model=p.image_models[0]}else if(p.models)s.model=p.models[0]}});renderSettings()}
+function addConn(){collect();const n=prompt('连接名称（英文，例如 deepseek 或 relay2）');if(!n)return;const id=n.replace(/[^\w-]/g,'').toLowerCase();if(!id||S.settings.connections[id])return toast('名称无效或已存在');S.settings.connections[id]={preset:'relay',kind:'openai',base_url:''};S.settings.has_key[id]=false;renderSettings()}
+function delConn(n){collect();delete S.settings.connections[n];Object.values(S.settings.stages).forEach(s=>{if(s.connection===n)s.connection='main'});S.keys[n]='-';renderSettings()}
+async function testApi(name){collect();const t=$('#t_'+name);t.textContent='保存并测试中…';try{await persist();const r=await api('/api/test-api',{connection:name});t.innerHTML=`<span style="color:var(--good)">✓ 可用（${E(r.model)}，${r.seconds}s）</span>`}catch(e){t.innerHTML=`<span class="err">✗ ${E(e.message)}</span>`}}
+
+const ACC_FIELDS=[['name','显示名称'],['id','代号（英文，唯一）'],['company_name','公司名（写进邮件）'],['contact_name','联系人名字'],['from_name','发件人显示名'],['sender','发件邮箱'],['whatsapp','WhatsApp（纯数字，含国家码）'],['website','公司官网']];
+function renderAcc(){
+  const st=S.settings,M=st.mail_presets,profs=st.profiles;
+  let h=`<p class="hint" style="margin-top:0">每个账号独立发信、独立节奏；所有账号共用一份去重名单，同一家公司不会被两个账号重复联系。</p>`;
+  h+=st.accounts.map((a,i)=>`<fieldset><legend>${E(a.name||a.id||'新账号')}</legend><div class="form">
+   ${ACC_FIELDS.map(([k,l])=>`<label>${l}<input data-a="${i}" data-k="${k}" value="${E(a[k]||'')}"></label>`).join('')}
+   <label>邮箱服务商<select onchange="mailPreset(${i},this.value)"><option value="">自定义…</option>${Object.entries(M).map(([k,m])=>opt(k,m.label,a.smtp&&a.smtp.host===m.smtp.host?k:'')).join('')}</select></label>
+   <label>SMTP 服务器 : 端口<div class="row" style="flex-wrap:nowrap"><input data-a="${i}" data-k="smtp.host" value="${E((a.smtp||{}).host||'')}"><input data-a="${i}" data-k="smtp.port" value="${E((a.smtp||{}).port||465)}" style="width:80px"></div></label>
+   <label>IMAP 服务器 : 端口<div class="row" style="flex-wrap:nowrap"><input data-a="${i}" data-k="imap.host" value="${E((a.imap||{}).host||'')}"><input data-a="${i}" data-k="imap.port" value="${E((a.imap||{}).port||993)}" style="width:80px"></div></label>
+   <label>邮箱密码 / 授权码<input type="password" data-pw="${a.id}" placeholder="${st.has_password[a.id]?(a.keychain_service?'使用钥匙串中的旧密码（留空不改）':'已保存（留空不改）'):'填写授权码'}" value="${E(S.pw[a.id]||'')}"></label>
+   <label>产品方案<select data-a="${i}" data-k="profile">${Object.values(profs).map(p=>opt(p.id,p.name,a.profile||'packaging')).join('')}</select></label>
+   <label>发送方式<select data-a="${i}" data-k="auto_send">${opt('true','自动发送',String(a.auto_send!==false))}${opt('false','人工审核后发送',String(a.auto_send!==false))}</select></label>
+   <label>每日上限（封）<input type="number" data-a="${i}" data-k="daily_limit" value="${a.daily_limit||40}"></label>
+   <label>两封间隔（分钟，最少-最多）<div class="row" style="flex-wrap:nowrap"><input type="number" data-a="${i}" data-k="interval0" value="${(a.send_interval_minutes||[4,9])[0]}"><input type="number" data-a="${i}" data-k="interval1" value="${(a.send_interval_minutes||[4,9])[1]}"></div></label>
+   <label>发送时段（北京时间，留空=全天）<div class="row" style="flex-wrap:nowrap"><input type="number" placeholder="如 15" data-a="${i}" data-k="hours0" value="${(a.send_hours_beijing||[])[0]??''}"><input type="number" placeholder="如 2" data-a="${i}" data-k="hours1" value="${(a.send_hours_beijing||[])[1]??''}"></div></label>
+   <label>邮件语言<select data-a="${i}" data-k="language">${[['en','English'],['de','Deutsch'],['fr','Français'],['es','Español']].map(([v,l])=>opt(v,l,a.language||'en')).join('')}</select></label>
+   <label>跟进邮件<select data-a="${i}" data-k="followup_enabled">${opt('false','关闭',String(!!a.followup_enabled))}${opt('true','未回复自动跟进 1 次（同一线程，不花 token）',String(!!a.followup_enabled))}</select></label>
+   <label>跟进间隔（天）<input type="number" data-a="${i}" data-k="followup_days" value="${a.followup_days||5}"></label>
+   <label class="wide">我们做什么（一句话，覆盖产品方案的默认介绍）<textarea data-a="${i}" data-k="pitch" rows="2">${E(a.pitch||'')}</textarea></label>
+   <label class="wide">目标市场<input data-a="${i}" data-k="markets" value="${E(a.markets||'')}" placeholder="留空用产品方案默认"></label>
+   <label class="wide">目标客户类型（每行一个，轮流搜索；留空用产品方案默认）<textarea data-a="${i}" data-k="focus" rows="4">${E((a.focus||[]).join('\n'))}</textarea></label>
+   <label class="wide">额外规则（可选，例如"卡纸盒 MOQ 1000"、"不要说我们有工厂"）<textarea data-a="${i}" data-k="extra_rules" rows="2">${E(a.extra_rules||'')}</textarea></label>
+   <label class="wide">签名文字<textarea data-a="${i}" data-k="signature" rows="5">${E(a.signature||'')}</textarea></label>
+   <label>签名图片 ${a.signature_image?'<span style="color:var(--good)">✓ 已设置</span>':''}<input type="file" accept="image/*" onchange="uploadSig('${a.id}',this)"></label>
+   <label>钥匙串服务名（旧版密码，可选）<input data-a="${i}" data-k="keychain_service" value="${E(a.keychain_service||'')}"></label>
+   <div class="row wide"><button class="small" onclick="testMail('${a.id}')">测试邮箱登录</button><span class="hint" id="m_${a.id}"></span><div class="spacer"></div><button class="small danger" onclick="delAcc(${i})">删除账号</button></div>
+  </div></fieldset>`).join('');
+  h+=`<button class="small" onclick="addAcc()">＋ 添加账号</button>`;
+  $('#sbody').innerHTML=h;
+}
+function mailPreset(i,k){if(!k)return;collect();const m=S.settings.mail_presets[k],a=S.settings.accounts[i];a.smtp={...m.smtp};a.imap={...m.imap};renderSettings()}
+function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:30,send_interval_minutes:[4,9],auto_send:false,language:'en'});renderSettings()}
+function delAcc(i){if(!confirm('删除这个账号？已发送记录会保留。'))return;collect();S.settings.accounts.splice(i,1);renderSettings()}
+async function testMail(id){collect();const t=$('#m_'+id);t.textContent='保存并测试中…';try{await persist();const r=await api('/api/test-mail',{account:id});t.innerHTML=`<span style="color:var(--good)">✓ ${E(r.message)}</span>`}catch(e){t.innerHTML=`<span class="err">✗ ${E(e.message)}</span>`}}
+function uploadSig(id,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async()=>{try{collect();await persist();await api('/api/signature',{account:id,data:r.result});toast('签名图片已更新');openSettings('acc')}catch(e){toast(e.message)}};r.readAsDataURL(f)}
+
+const PF=[['name','方案名称','input'],['concept_noun','方案类型（英文，如 packaging / retail display）','input'],['offer','我们做什么（英文）','text2'],['markets','默认目标市场','input'],['ideal_customers','默认目标客户（每行一个）','lines'],['exclude','排除哪些公司','input'],['concept_library','方案库（模型从中挑 A/B）','text8'],['design_guidance','设计原则','text3'],['email_extra','邮件额外规则','text2'],['subject_examples','主题示例（每行一个）','lines'],['cta_examples','结尾提问示例（每行一个）','lines']];
+function renderProf(){
+  const ps=S.settings.profiles;S.pid=S.pid&&ps[S.pid]?S.pid:Object.keys(ps)[0];const p=ps[S.pid];
+  let h=`<p class="hint" style="margin-top:0">产品方案决定"卖什么、找谁、怎么写、怎么画"。以后开发其他产品：选一个方案 →「另存为新方案」→ 改内容 → 在账号里选用。</p>
+   <div class="row" style="margin-bottom:12px"><select style="width:auto" onchange="collectProf();S.pid=this.value;renderSettings()">${Object.values(ps).map(x=>opt(x.id,x.name,S.pid)).join('')}</select><button class="small" onclick="cloneProf()">另存为新方案</button></div><div class="form">`;
+  h+=PF.map(([k,l,t])=>{const v=p[k];if(t==='input')return `<label class="${k==='name'?'':'wide'}">${l}<input data-p="${k}" value="${E(v||'')}"></label>`;
+    if(t==='lines')return `<label class="wide">${l}<textarea data-p="${k}" data-lines="1" rows="4">${E((v||[]).join('\n'))}</textarea></label>`;
+    return `<label class="wide">${l}<textarea data-p="${k}" rows="${t.slice(4)}">${E(v||'')}</textarea></label>`}).join('');
+  const im=p.image||{},fu=p.followup||{};
+  h+=`<label class="chk wide"><input type="checkbox" data-p="image.enabled" ${im.enabled!==false?'checked':''}> 生成 A/B 效果图</label>
+   <label class="wide">生图提示词模板（可用 {product} {count} {a_structure} {a_visual} {b_structure} {b_visual} {brand} {scene} {footer}）<textarea data-p="image.prompt" rows="8">${E(im.prompt||'')}</textarea></label>
+   <label class="wide">图片底部小字<input data-p="image.footer" value="${E(im.footer||'')}"></label>
+   <label class="wide">跟进邮件模板（可用 {brand} {product} {contact}）<textarea data-p="followup.body" rows="5">${E(fu.body||'')}</textarea></label></div>`;
+  $('#sbody').innerHTML=h;
+}
+function collectProf(){const p=S.settings.profiles[S.pid];if(!p||!document.querySelector('[data-p]'))return;S.pdirty=S.pdirty||new Set();S.pdirty.add(S.pid);document.querySelectorAll('[data-p]').forEach(el=>{const k=el.dataset.p;let v=el.type==='checkbox'?el.checked:el.dataset.lines?el.value.split('\n').map(s=>s.trim()).filter(Boolean):el.value;
+  if(k.includes('.')){const [a,b]=k.split('.');p[a]=p[a]||{};p[a][b]=v}else p[k]=v})}
+function cloneProf(){collectProf();const id=(prompt('新方案代号（英文，例如 candles 或 acrylic-display）')||'').replace(/[^\w-]/g,'').toLowerCase();if(!id)return;if(S.settings.profiles[id])return toast('已存在');
+  S.settings.profiles[id]=JSON.parse(JSON.stringify(S.settings.profiles[S.pid]));S.settings.profiles[id].id=id;S.settings.profiles[id].name+='（副本）';S.pid=id;renderSettings()}
+
+async function renderData(){
+  const st=S.state||{};
+  $('#sbody').innerHTML=`<fieldset><legend>版本与更新</legend><div class="row"><span>当前版本 <b>v${E(S.settings.version)}</b></span><button class="small" onclick="checkUpd()">检查更新</button><span id="upd" class="hint"></span></div>
+   <p class="hint">代码在 GitHub：<a href="https://github.com/Alexanderhe1212/packaging-outreach" target="_blank">Alexanderhe1212/packaging-outreach</a>。更新只替换程序文件，账号、密钥、客户记录都在数据目录，不受影响。</p></fieldset>
+   <fieldset><legend>导入不联系名单（CSV）</legend><p class="hint">表头包含 email 或 website 列即可，例如从其他系统导出的已联系客户。</p><textarea id="csv" rows="5" placeholder="email,website&#10;hello@brand.com,brand.com"></textarea><div class="row" style="margin-top:8px"><button class="small" onclick="importCsv()">导入</button></div></fieldset>
+   <fieldset><legend>数据</legend><p class="hint">数据目录：<code>${E(st.data_dir||'')}</code><br>旧版名单导入：${st.legacy?`已导入 ${st.legacy.contacted} 个已联系、${st.legacy.stops} 个回复/退订/退信记录`:'未配置'}</p></fieldset>`;
+}
+async function checkUpd(){const u=$('#upd');u.textContent='检查中…';const r=await api('/api/update/check');if(r.error){u.textContent=r.error;return}
+  u.innerHTML=r.update?`发现新版本 v${E(r.latest)} <button class="small primary" onclick="applyUpd()">立即更新并重启</button>`:`已是最新（GitHub v${E(r.latest)}）`}
+async function applyUpd(){$('#upd').textContent='更新中…';try{await api('/api/update/apply',{});toast('更新完成，正在重启…',5000);setTimeout(()=>location.reload(),4000)}catch(e){$('#upd').textContent=e.message}}
+async function importCsv(){try{const r=await api('/api/import-csv',{csv:$('#csv').value});toast('已导入 '+r.imported+' 条')}catch(e){toast(e.message)}}
+
+function setPath(o,path,v){const ks=path.split('.');let t=o;ks.slice(0,-1).forEach(k=>{t[k]=t[k]||{};t=t[k]});t[ks.at(-1)]=v}
+function collect(){
+  const st=S.settings;if(!st)return;
+  document.querySelectorAll('[data-c]').forEach(el=>{st.connections[el.dataset.c][el.dataset.k]=el.value.trim()});
+  document.querySelectorAll('[data-key]').forEach(el=>{if(el.value)S.keys[el.dataset.key]=el.value.trim()});
+  document.querySelectorAll('[data-s]').forEach(el=>{const s=st.stages[el.dataset.s];let v=el.type==='checkbox'?el.checked:el.type==='number'?+el.value:el.value.trim();s[el.dataset.k]=v});
+  document.querySelectorAll('[data-pw]').forEach(el=>{if(el.value)S.pw[el.dataset.pw]=el.value});
+  document.querySelectorAll('[data-a]').forEach(el=>{const a=st.accounts[+el.dataset.a],k=el.dataset.k,v=el.value;
+    if(k==='interval0'||k==='interval1'){a.send_interval_minutes=a.send_interval_minutes||[4,9];a.send_interval_minutes[+k.slice(-1)]=+v||0}
+    else if(k==='hours0'||k==='hours1'){a._h=a._h||[...(a.send_hours_beijing||['',''])];a._h[+k.slice(-1)]=v}
+    else if(k==='focus')a.focus=v.split('\n').map(s=>s.trim()).filter(Boolean);
+    else if(['auto_send','followup_enabled'].includes(k))a[k]=v==='true';
+    else if(['daily_limit','followup_days','smtp.port','imap.port'].includes(k))setPath(a,k,+v||0);
+    else setPath(a,k,v.trim())});
+  st.accounts.forEach(a=>{if(a._h){a.send_hours_beijing=(a._h[0]!==''&&a._h[1]!=='')?[+a._h[0],+a._h[1]]:null;delete a._h}});
+  if(S.stab==='prof')collectProf();
+}
+async function persist(){
+  const st=S.settings;
+  const r=await api('/api/settings',{connections:st.connections,stages:st.stages,accounts:st.accounts,keys:S.keys,passwords:S.pw});
+  for(const id of (S.pdirty||[]))await api('/api/profile',{profile:st.profiles[id]});S.pdirty=new Set();
+  const profiles=st.profiles;S.settings=r;S.settings.profiles=profiles;S.keys={};S.pw={};
+}
+async function saveSettings(){collect();try{await persist();toast('已保存');renderSettings();refresh()}catch(e){toast(e.message,5000)}}
+
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();closeModal('addModal');closeModal('setModal')}});
+async function tick(){await refresh();if(!S.editing)loadLeads();loadUsage()}
+tick();setInterval(refresh,3000);setInterval(()=>{if(!S.editing&&!$('#setModal').classList.contains('open'))loadLeads();loadUsage()},8000);
+</script>
+</body>
+</html>

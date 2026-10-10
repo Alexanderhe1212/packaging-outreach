@@ -1,0 +1,55 @@
+{
+  "port": 18800,
+  "connections": {
+    "main": {"preset": "openai", "kind": "openai", "base_url": "https://api.openai.com/v1"}
+  },
+  "stages": {
+    "discover": {"connection": "main", "model": "gpt-5-mini", "web_search": true, "batch": 6},
+    "write": {"connection": "main", "model": "gpt-5-mini", "effort": "low", "vision": true},
+    "image": {"connection": "main", "model": "gpt-image-1", "size": "1536x1024", "quality": "medium"}
+  },
+  "inbox_check_minutes": 10,
+  "legacy": {"databases": [], "constraints": []},
+
+  "api_presets": {
+    "openai":     {"label": "OpenAI 官方", "kind": "openai", "base_url": "https://api.openai.com/v1", "search": true, "image": true,
+                   "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1-mini"], "image_models": ["gpt-image-1", "gpt-image-1-mini"],
+                   "key_url": "https://platform.openai.com/api-keys"},
+    "anthropic":  {"label": "Anthropic Claude", "kind": "anthropic", "base_url": "https://api.anthropic.com", "search": true, "image": false,
+                   "models": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], "key_url": "https://console.anthropic.com/settings/keys"},
+    "gemini":     {"label": "Google Gemini", "kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "search": false, "image": true,
+                   "models": ["gemini-2.5-flash", "gemini-2.5-pro"], "image_models": ["imagen-4.0-generate-001"], "key_url": "https://aistudio.google.com/apikey"},
+    "deepseek":   {"label": "DeepSeek", "kind": "openai", "base_url": "https://api.deepseek.com/v1", "search": false, "image": false,
+                   "models": ["deepseek-chat", "deepseek-reasoner"], "key_url": "https://platform.deepseek.com/api_keys"},
+    "qwen":       {"label": "通义千问（阿里云百炼）", "kind": "openai", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "search": true, "search_param": {"enable_search": true}, "image": false,
+                   "models": ["qwen-plus", "qwen-max", "qwen-vl-max"], "key_url": "https://bailian.console.aliyun.com/?apiKey=1"},
+    "kimi":       {"label": "Kimi（Moonshot）", "kind": "openai", "base_url": "https://api.moonshot.cn/v1", "search": false, "image": false,
+                   "models": ["kimi-k2-turbo-preview", "moonshot-v1-32k-vision-preview"], "key_url": "https://platform.moonshot.cn/console/api-keys"},
+    "zhipu":      {"label": "智谱 GLM", "kind": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4", "search": false, "image": false,
+                   "models": ["glm-4.5", "glm-4.5v"], "key_url": "https://open.bigmodel.cn/usercenter/apikeys"},
+    "openrouter": {"label": "OpenRouter（一个 Key 用所有模型）", "kind": "openai", "base_url": "https://openrouter.ai/api/v1", "search": true, "search_suffix": ":online", "image": false,
+                   "models": ["openai/gpt-5-mini", "anthropic/claude-sonnet-5-5", "google/gemini-2.5-flash", "deepseek/deepseek-chat"], "key_url": "https://openrouter.ai/keys"},
+    "relay":      {"label": "中转 / 自定义（OpenAI 兼容）", "kind": "openai", "base_url": "", "search": true, "image": true,
+                   "models": ["gpt-5-mini", "gpt-5", "claude-sonnet-5-5", "gemini-2.5-flash"], "image_models": ["gpt-image-1"]},
+    "codex":      {"label": "本机 Codex CLI（ChatGPT 订阅，无需 Key）", "kind": "codex", "base_url": "", "search": true, "image": false, "nokey": true,
+                   "models": ["gpt-5-mini", "gpt-5"]}
+  },
+
+  "mail_presets": {
+    "exmail":  {"label": "腾讯企业邮", "smtp": {"host": "smtp.exmail.qq.com", "port": 465}, "imap": {"host": "imap.exmail.qq.com", "port": 993}},
+    "aliyun":  {"label": "阿里企业邮", "smtp": {"host": "smtp.qiye.aliyun.com", "port": 465}, "imap": {"host": "imap.qiye.aliyun.com", "port": 993}},
+    "netease": {"label": "网易企业邮", "smtp": {"host": "smtphz.qiye.163.com", "port": 465}, "imap": {"host": "imaphz.qiye.163.com", "port": 993}},
+    "gmail":   {"label": "Gmail / Google Workspace", "smtp": {"host": "smtp.gmail.com", "port": 465}, "imap": {"host": "imap.gmail.com", "port": 993}},
+    "outlook": {"label": "Outlook / Microsoft 365", "smtp": {"host": "smtp.office365.com", "port": 587}, "imap": {"host": "outlook.office365.com", "port": 993}},
+    "zoho":    {"label": "Zoho Mail", "smtp": {"host": "smtp.zoho.com", "port": 465}, "imap": {"host": "imap.zoho.com", "port": 993}}
+  },
+
+  "pricing_usd_per_million": {
+    "gpt-5": [1.25, 10], "gpt-5-mini": [0.25, 2], "gpt-5-nano": [0.05, 0.4], "gpt-4.1-mini": [0.4, 1.6],
+    "claude-opus-5-5": [4, 20], "claude-sonnet-5-5": [2, 10], "claude-haiku-5-5": [0.1, 0.5],
+    "gemini-2.5-flash": [0.3, 2.5], "gemini-2.5-pro": [1.25, 10],
+    "deepseek-chat": [0.27, 1.1], "deepseek-reasoner": [0.55, 2.19]
+  },
+  "pricing_usd_per_image": {"gpt-image-1:low": 0.016, "gpt-image-1:medium": 0.063, "gpt-image-1:high": 0.25,
+                            "gpt-image-1-mini:low": 0.006, "gpt-image-1-mini:medium": 0.015, "gpt-image-1-mini:high": 0.052}
+}

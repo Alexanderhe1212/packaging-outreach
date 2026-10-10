@@ -15,3 +15,7 @@ private/
 *.eml
 *.pdf
 .DS_Store
+settings.json
+secrets.json
+*.jpg
+!ui/*.jpg

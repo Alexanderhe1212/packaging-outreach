@@ -1,0 +1,25 @@
+{
+  "id": "display-stands",
+  "name": "零售陈列架 / 展示道具（示例：换产品只需复制这个文件改内容）",
+  "concept_noun": "retail display",
+  "offer": "We design and manufacture custom countertop displays, floor displays and shelf-ready trays in cardboard, acrylic and wood, from 3D render and sample to bulk.",
+  "ideal_customers": [
+    "cosmetics and nail polish brands selling through boutiques and pharmacies",
+    "snack, confectionery and beverage brands entering retail",
+    "eyewear, phone accessory and small electronics brands with retail partners",
+    "craft beer, spirits and specialty food brands with shop placements"
+  ],
+  "markets": "USA, Canada, UK, Germany, France, Netherlands, Australia",
+  "exclude": "marketplaces, giant corporations, display/printing companies",
+  "concept_library": "Display types (A and B must differ):\n- countertop display unit (CDU) with header card\n- floor-standing display unit (FSDU) with 3-5 shelves\n- shelf-ready tray / PDQ with tear-away front\n- acrylic countertop riser with logo base\n- rotating spinner display\n- dump bin for loose items\n- wooden crate-style display\nMaterials and finishes: printed corrugated, white or kraft board, clear/frosted acrylic, oak veneer, LED edge-lit header, magnetic graphic panels.",
+  "design_guidance": "Choose by product size, number of SKUs/facings, retail channel and how shoppers pick the item. Use the brand colours. Show product facings realistically filled.",
+  "email_extra": "Never give prices, lead times or certifications. Concepts are for discussion and need a sample.",
+  "subject_examples": ["two counter display ideas for your lip oils", "Trail Mix - shelf display concepts"],
+  "cta_examples": ["If one fits your retail plans, reply A or B with roughly how many stores and I'll send pricing and a sample timeline."],
+  "image": {
+    "enabled": true,
+    "prompt": "Photorealistic retail display presentation, landscape, two display concepts side by side for the same product.\n\nPRODUCT (keep it exactly like the reference photo; do not redesign it): {product}.\n\nLEFT - concept \"A\": {a_structure}. {a_visual}\nRIGHT - concept \"B\": {b_structure}. {b_visual}\n\nBoth displays filled with the product in a clean modern shop setting. The brand name \"{brand}\" appears on each display header, spelled exactly. No other words.\n\nSmall letters \"A\" and \"B\" near the top of each half. Small footer text: \"{footer}\".\n\nScene: {scene}. Bright retail lighting, catalogue photography, both concepts fully in frame.",
+    "footer": "Display concept for discussion"
+  },
+  "followup": {"enabled": false, "days": 6, "body": "Hi {brand} team,\n\nQuick follow-up on the two display ideas for {product} - happy to tweak sizes or send a sample.\n\nWould A or B be worth a quote?"}
+}
