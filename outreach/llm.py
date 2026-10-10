@@ -438,8 +438,10 @@ class Stage:
                 low = err.lower()
                 fatal = any(w in low for w in ('login', 'not logged', 'unauthorized', 'usage limit', 'rate limit reached', 'quota'))
                 raise AIError('Codex 调用失败：' + err.strip(), fatal=fatal)
+            self.model = 'codex:' + (model or 'default')  # usage rows show the subscription, priced at $0
             self._record(usage.get('input_tokens', 0), usage.get('output_tokens', 0), usage.get('cached_input_tokens', 0),
                          images=1 if generate_image else 0)
+            self.model = model
             text = out.read_text(encoding='utf-8') if out.exists() else ''
             return text, thread, began
 

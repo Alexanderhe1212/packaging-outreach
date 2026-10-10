@@ -245,6 +245,8 @@ def set_current_lead(lid):
 def estimate_cost(model, inp, out, cached=0, images=0, searches=0, quality=''):
     cfg = config.load()
     name = model.split('/')[-1].split(':')[0]
+    if not name or name.startswith('codex'):
+        return 0.0  # Codex / ChatGPT subscription: no per-call charge, tokens are still recorded
     cost = 0.0
     price = cfg.get('pricing_usd_per_million', {}).get(name)
     if price:
