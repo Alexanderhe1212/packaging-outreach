@@ -18,6 +18,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):  # Windows consoles may not be UTF-8: never crash on Chinese output
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from outreach import config  # noqa: E402
 
