@@ -16,13 +16,25 @@
 | 接口 | 只有 Codex 登录 | OpenAI / Claude / Gemini / DeepSeek / 通义 / Kimi / 智谱 / OpenRouter / 任意中转 / 本机 Codex |
 | 成本可见 | 无 | 每封邮件真实 token 和估算费用显示在界面上 |
 
+## 一句话开工（终端、Codex、Claude Code 都一样）
+
+```bash
+outreach go        # 开工：自动启动后台、开始所有账号、报告状态（也可以写 outreach 开工）
+outreach status    # 状态
+outreach replies   # 最近的客户回复
+outreach stop      # 收工
+```
+在 Codex 或 Claude Code 里直接说「开工」「看看开发信状态」「有人回复吗」即可（安装时自动装好 Skill）。
+
+**没有 API Key？** 在 ⚙ 设置 → AI 接口 选「本机 Codex（ChatGPT 订阅）」，三个阶段（含生图）都能用 Codex 完成。程序给 Codex 用一个精简的独立目录（只共享登录），不加载你的插件、Skill 和全局配置：每次调用的固定开销从约 2.6 万 token 降到约 4,700。
+
 ## 安装
 
 ```bash
 git clone https://github.com/Alexanderhe1212/packaging-outreach ~/OutreachPilot
 cd ~/OutreachPilot
 python3 app.py                       # 启动并打开窗口
-bash scripts/install_mac_app.sh      # macOS：在桌面生成 OutreachPilot.app，以后双击打开
+bash scripts/install_mac_app.sh      # macOS：桌面 OutreachPilot.app + 全局 outreach 命令 + Codex/Claude Skill
 ```
 Windows 双击 `start.bat`；Linux 运行 `./start.sh`。
 

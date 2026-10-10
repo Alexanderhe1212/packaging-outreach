@@ -12,6 +12,7 @@ import shutil
 import ssl
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -21,6 +22,7 @@ from pathlib import Path
 from . import config
 
 _UNSUPPORTED = {}   # (connection, model) -> set of features the endpoint rejected
+_CODEX_LOCK = threading.Lock()
 
 
 class AIError(RuntimeError):
@@ -154,7 +156,7 @@ class Stage:
         self.kind = self.conn['kind']
         self.model = (self.opts.get('model') or '').strip()
         self.timeout = float(self.opts.get('timeout', 300))
-        if not self.model:
+        if not self.model and self.kind != 'codex':
             raise AIError('阶段 %s 没有设置模型' % stage, fatal=True, setup=True)
         if self.kind != 'codex' and not self.conn['key'] and not self.conn['preset_info'].get('nokey'):
             raise AIError('还没有填写「%s」连接的 API Key（设置 → AI 接口）' % self.conn['name'], fatal=True, setup=True)
@@ -348,34 +350,120 @@ class Stage:
         self._record(totals[0], totals[1], totals[2], searches=totals[3])
         return '\n'.join(texts)
 
-    # ---------- local Codex CLI (uses the ChatGPT subscription) ----------
-    def _codex(self, system, user, image, search):
+    # ---------- local Codex CLI (uses the ChatGPT subscription, no API key) ----------
+    CODEX_OFF = ('shell_tool', 'unified_exec', 'shell_snapshot', 'apps', 'plugins', 'remote_plugin', 'hooks', 'memories',
+                 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'in_app_browser', 'computer_use',
+                 'multi_agent', 'collaboration_modes', 'goals', 'code_mode_host', 'view_image', 'skill_search', 'tool_suggest',
+                 'skill_mcp_dependency_install', 'workspace_dependencies', 'personality', 'guardian_approval')
+
+    def _codex_cli(self):
         cli = self.conn.get('cli_path') or shutil.which('codex') or os.path.expanduser('~/.local/bin/codex')
         if not os.path.exists(cli):
             raise AIError('没找到 codex 命令，请先安装并登录 Codex CLI', fatal=True)
+        return cli
+
+    @staticmethod
+    def codex_home():
+        """A private, nearly empty CODEX_HOME: only the ChatGPT login is shared. The user's ~40 skills, hooks, memories
+        and config are not loaded into every call (measured: ~26k -> ~4.7k input tokens of fixed overhead)."""
+        main = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+        home = config.data_dir() / 'codex-home'
+        home.mkdir(exist_ok=True)
+        (home / 'instructions.md').write_text('You are a concise assistant inside a business app. Follow the user message exactly. '
+                                              'When asked for JSON, reply with JSON only.', encoding='utf-8')
+        with _CODEX_LOCK:  # several account workers share this folder
+            return Stage._sync_codex_login(home, main / 'auth.json')
+
+    @staticmethod
+    def _sync_codex_login(home, src):
+        link = home / 'auth.json'
+        if not src.exists():
+            raise AIError('Codex 还没有登录：在终端运行 codex login，用 ChatGPT 账号登录', fatal=True)
+        if link.exists() and not link.is_symlink():
+            # Codex refreshed the login here and replaced the link with a file: hand the newer tokens back first.
+            if link.stat().st_mtime > src.stat().st_mtime:
+                shutil.copy2(link, src)
+            link.unlink()
+        if not link.is_symlink():
+            try:
+                link.symlink_to(src)
+            except FileExistsError:
+                pass
+        return home
+
+    def _codex_model(self):
+        """Blank = Codex's own default for a ChatGPT login (the model in config.toml may need an API provider)."""
+        return '' if self.model.lower() in ('', 'default', '默认') else self.model
+
+    def _codex_run(self, prompt, images, search=False, generate_image=False):
+        """Run one lean `codex exec`: user config, MCP servers, plugins and tools are off so each call carries little overhead."""
         with tempfile.TemporaryDirectory() as d:
             out = Path(d) / 'answer.txt'
-            args = [cli, 'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '--color', 'never',
-                    '-C', d, '-m', self.model, '-c', 'model_reasoning_effort="%s"' % (self.opts.get('effort') or 'low'),
-                    '-c', 'web_search="%s"' % ('live' if search else 'disabled'), '-c', 'project_doc_max_bytes=0', '-o', str(out)]
-            if image is not None and self.opts.get('vision', True):
-                img = Path(d) / ('product' + {'image/png': '.png', 'image/webp': '.webp'}.get(mime(image), '.jpg'))
-                img.write_bytes(image)
+            args = [self._codex_cli(), '-a', 'never', 'exec', '--ignore-user-config', '--skip-git-repo-check', '--ephemeral',
+                    '--sandbox', 'read-only', '--color', 'never', '--json', '-C', d,
+                    '-c', 'model_reasoning_effort="%s"' % (self.opts.get('effort') or 'low'),
+                    '-c', 'web_search="%s"' % ('live' if search else 'disabled'), '-c', 'project_doc_max_bytes=0',
+                    '-c', 'forced_login_method="chatgpt"', '-o', str(out)]
+            model = self._codex_model()
+            if model:
+                args += ['-m', model]
+            for f in self.CODEX_OFF:
+                if not (generate_image and f == 'code_mode_host'):  # image generation runs through the code-mode host
+                    args += ['--disable', f]
+            args += ['--enable' if generate_image else '--disable', 'image_generation']
+            home = self.codex_home()
+            args[args.index('-o'):args.index('-o')] = ['-c', 'model_instructions_file="%s"' % (home / 'instructions.md')]
+            for i, raw in enumerate(images):
+                img = Path(d) / ('ref%d%s' % (i, {'image/png': '.png', 'image/webp': '.webp'}.get(mime(raw), '.jpg')))
+                img.write_bytes(raw)
                 args += ['-i', str(img)]
-            prompt = system + '\n\n' + user
+            args.append('-')
+            began = time.time()
             try:
-                p = subprocess.run(args, input=prompt.encode('utf-8'), capture_output=True, timeout=self.timeout or 600)
+                p = subprocess.run(args, input=prompt.encode('utf-8'), capture_output=True, timeout=self.timeout or 900,
+                                   env=dict(os.environ, CODEX_HOME=str(home)))
             except subprocess.TimeoutExpired:
                 raise AIError('Codex 超时')
-            if p.returncode != 0 or not out.exists():
-                err = (p.stderr or p.stdout).decode('utf-8', 'replace')[-300:]
-                fatal = 'login' in err.lower() or 'auth' in err.lower()
+            finally:
+                self.codex_home()  # re-sync the login if Codex refreshed it during this call
+            events = []
+            for line in p.stdout.decode('utf-8', 'replace').splitlines():
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    pass
+            usage = next((e.get('usage') for e in reversed(events) if e.get('type') == 'turn.completed' and e.get('usage')), {}) or {}
+            thread = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), '')
+            if p.returncode != 0:
+                err = (p.stderr.decode('utf-8', 'replace') or json.dumps(events[-1:]))[-400:]
+                low = err.lower()
+                fatal = any(w in low for w in ('login', 'not logged', 'unauthorized', 'usage limit', 'rate limit reached', 'quota'))
                 raise AIError('Codex 调用失败：' + err.strip(), fatal=fatal)
-            self._record(len(prompt) // 4, out.stat().st_size // 4)  # CLI does not report usage here; rough estimate
-            return out.read_text(encoding='utf-8')
+            self._record(usage.get('input_tokens', 0), usage.get('output_tokens', 0), usage.get('cached_input_tokens', 0),
+                         images=1 if generate_image else 0)
+            text = out.read_text(encoding='utf-8') if out.exists() else ''
+            return text, thread, began
+
+    def _codex(self, system, user, image, search):
+        images = [image] if image is not None and self.opts.get('vision', True) else []
+        text, _, _ = self._codex_run(system + '\n\n' + user, images, search=search)
+        return text
+
+    def _codex_image(self, prompt, reference):
+        ask = ('Call your image generation tool directly (do not read any skill or file) to create exactly ONE landscape image. '
+               'No text reply. '
+               + ('The attached photo is the real product: keep it identical in the image. ' if reference else '') + prompt)
+        _, thread, began = self._codex_run(ask, [reference] if reference is not None else [], generate_image=True)
+        folder = self.codex_home() / 'generated_images' / (thread or '-')
+        pics = sorted((f for f in folder.glob('*.png') if f.stat().st_mtime >= began - 1), key=lambda f: f.stat().st_mtime) if folder.exists() else []
+        if not pics:
+            raise AIError('Codex 没有生成图片（可能是订阅额度用完或生图功能不可用）')
+        return pics[-1].read_bytes()
 
     # ---------- image generation ----------
     def image(self, prompt, reference=None):
+        if self.kind == 'codex':
+            return self._codex_image(prompt, reference)
         if self.kind != 'openai' or not self.conn['preset_info'].get('image', True):
             raise AIError('「%s」连接不支持生图，请在 设置 → AI 接口 给「效果图」选择支持生图的连接（如 OpenAI / 中转）' % self.conn['name'], fatal=True)
         size = self.opts.get('size', '1536x1024')

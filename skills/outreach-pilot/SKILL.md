@@ -1,49 +1,41 @@
 ---
 name: outreach-pilot
-description: Operate OutreachPilot, the local AI cold-outreach app (find real brands, read their official site for a public email and hero product, write a personalised email with two A/B product concepts and a concept image, send from several mailboxes, track replies). Use when the user wants to start/pause outreach, check sending status or costs, add prospects by URL, set up an API key or mailbox, create a product profile to sell something new (packaging, displays, any custom product), or install/update the app.
+description: 一键开发客户 / AI 外贸开发信（OutreachPilot）。Use whenever the user says 开工, 收工, 开发客户, 找客户, 发开发信, 开发信状态, 看回复, 加客户, "start outreach", "check outreach", or asks about MTT/GUKA cold emails, sending status, replies, costs, API/Codex setup, or selling a new product with the outreach app.
 ---
 
-# OutreachPilot
+# OutreachPilot — one command
 
-Repo: https://github.com/Alexanderhe1212/packaging-outreach. Pure Python 3.9+ standard library. One local service (`http://127.0.0.1:18800`) runs every mailbox account; the UI, the CLI and you all use the same JSON API.
+The app does all the work (find brands → read official site → write email + A/B concept → concept image → send → track replies). Your job is only to call it. Do not research customers, write emails or edit its database yourself.
 
-## Is it installed and running?
+## The commands (that is the whole interface)
 
-```bash
-python3 <repo>/app.py status        # accounts, today's sends, ready emails, cost
-```
-Not installed: `git clone https://github.com/Alexanderhe1212/packaging-outreach ~/OutreachPilot`, then `python3 ~/OutreachPilot/app.py` (macOS desktop icon: `bash scripts/install_mac_app.sh`). Not running: start it with `python3 app.py --no-browser` in the background.
-
-## Everyday operations (prefer these; never edit the database)
-
-| Goal | Command |
+| User says | Run |
 |---|---|
-| Start / pause all or one account | `python3 app.py start [ACCOUNT]` / `pause [ACCOUNT]` |
-| Add prospects (sites or emails) | `python3 app.py add ACCOUNT brand.com hello@other.de` |
-| Token & cost report (7 days) | `python3 app.py usage` |
-| Recent leads | `curl -s 'http://127.0.0.1:18800/api/leads?status=replied&limit=20'` |
-| One lead incl. email + research | `curl -s http://127.0.0.1:18800/api/lead/ID` |
+| 开工 / 开始开发客户 / start | `outreach go` |
+| 收工 / 暂停 / stop | `outreach stop` |
+| 状态 / 今天发了多少 / status | `outreach status` |
+| 看回复 / 有人回复吗 | `outreach replies` |
+| 加客户 brand.com … | `outreach add ACCOUNT brand.com other.co.uk hello@x.de` (accounts: see `outreach status`) |
+| 打开界面 | `outreach open` |
+| 花了多少 token / 费用 | `outreach usage` |
 
-POST endpoints need `Content-Type: application/json`: `/api/start`, `/api/pause`, `/api/add {account, urls}`, `/api/send {id}`, `/api/skip {id}`, `/api/edit {id, subject, body}`, `/api/redo {id, what: image|all}`, `/api/settings`, `/api/test-api {connection}`, `/api/test-mail {account}`.
+`outreach go` starts the background service by itself if needed, starts every account and prints the status — then report that status to the user in 2–4 short lines (per account: running/paused, sent today, ready, replies, any ⚠ error) and stop. One command, one short answer.
 
-Read only what you need: status first, then at most ~20 leads, then a single lead. Do not dump the whole history.
+If `outreach` is not found: `python3 "<repo>/app.py" go` (same commands). If it still fails because localhost/network or starting a background process is blocked by your sandbox, rerun the same command with the permission/escalation your environment offers; do not try to work around the app.
 
-## Setup the user may ask for
+## When status shows an error
 
-- **API key**: easiest in the UI (⚙ 设置 → AI 接口). Presets: OpenAI, Claude, Gemini, DeepSeek, Qwen, Kimi, GLM, OpenRouter, any OpenAI-compatible relay, local Codex CLI (no key). Each stage (discover / write / image) picks a connection + model. The image stage needs an image-capable connection (OpenAI or a relay). Never print or commit keys; they live in `<data>/secrets.json` (0600).
-- **Mailbox**: ⚙ 设置 → 账号; presets for Tencent Exmail, Aliyun, NetEase, Gmail, Outlook, Zoho. Use an app password / 授权码. Then `/api/test-mail`.
-- **New product to sell**: copy `profiles/packaging.json` to `<data>/profiles/<id>.json` (or ⚙ 设置 → 产品方案 → 另存为新方案), rewrite `offer`, `ideal_customers`, `concept_library`, `image.prompt`; select it on an account. `profiles/display-stands.json` is a worked example.
+- `等待设置` / no API key, or `API 鉴权或额度问题` → the user picks an AI connection in the UI (`outreach open` → ⚙ 设置 → AI 接口). Without an API key choose 「本机 Codex」 for all three stages (uses the ChatGPT subscription). Never ask the user to paste keys into chat.
+- `Codex 调用失败 … login` → the user runs `codex login` once.
+- `邮箱登录失败` → fix the mailbox 授权码 in ⚙ 设置 → 账号.
+- `⚠ 旧版开发信程序仍在运行` → tell the user; old programs must be closed to avoid double sending.
 
-Data dir: macOS `~/Library/Application Support/OutreachPilot`, else `~/.outreach-pilot` (`OUTREACH_DATA` overrides).
+## Selling something new
 
-## How the pipeline spends tokens (explain when asked about cost)
-
-1. discover: one cheap call returns ~6 candidate domains (web search if the provider has it).
-2. crawl: zero tokens — public email, hero product, price and photo come straight from the official site (Shopify products.json, JSON-LD, og tags). Sites without a public email or real product are skipped for free.
-3. write: one call per lead; product photo sent at 512px low detail; static system prompt first so providers cache it.
-4. image: one A/B concept image per lead using the real product photo as reference.
-No review loops. Each lead's real token use and estimated cost is stored and shown in the UI.
+Copy `<repo>/profiles/packaging.json` into the UI's ⚙ 设置 → 产品方案 → 另存为新方案, rewrite offer / ideal customers / concept library / image prompt, select it on an account, then `outreach go`.
 
 ## Rules that stay on
 
-Only addresses published on the company's own site; one company is contacted by one account only; replies, unsubscribes, bounces and unresolved SMTP results are never emailed again; an SMTP result of "unknown" is never auto-resent; concepts are for discussion (no prices, lead times or certifications). Do not bypass these when operating the app. Sending real email is the user's decision: only start sending when they ask.
+Only emails published on the company's own site; each company is contacted by one account only; replies, unsubscribes, bounces and unknown SMTP results are never emailed again. Sending real email is the user's call: run `outreach go` only when they ask to start.
+
+Details (JSON API for other tools): POST `http://127.0.0.1:18800/api/{start,pause,add,send,skip,edit,redo}` with `Content-Type: application/json`; GET `/api/state`, `/api/leads?status=replied&limit=20`, `/api/lead/ID`, `/api/usage`.

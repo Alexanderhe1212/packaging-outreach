@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """OutreachPilot - AI 外贸开发信工作台。
 
+  outreach go        （或 outreach 开工）一键开工：自动启动后台、开始所有账号、报告状态
+  outreach stop      （或 outreach 收工）暂停所有账号
+  outreach open      打开界面窗口
+  outreach replies   最近的客户回复
+
   python3 app.py                 启动并打开窗口（已在运行则直接打开窗口）
   python3 app.py --no-browser    只启动后台服务
   python3 app.py status          查看各账号状态
@@ -55,19 +60,63 @@ def open_window():
     webbrowser.open(URL)
 
 
+def ensure_running():
+    """Start the background service detached (survives the terminal / agent session that launched it)."""
+    if running():
+        return True
+    log = config.data_dir() / 'app.log'
+    with open(log, 'ab') as out:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--no-browser'], stdout=out, stderr=out,
+                         stdin=subprocess.DEVNULL, start_new_session=True, cwd=str(Path(__file__).resolve().parent))
+    import time
+    for _ in range(60):
+        if running():
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def print_status():
+    st = call('/api/state')
+    for a in st['accounts']:
+        s = a['stats']
+        print('%-6s %-4s 今日已发 %s/%s  待发 %s  准备中 %s  已回复 %s  今日费用 $%s\n       %s%s' % (
+            a['id'], '暂停' if a['paused'] else '运行', s.get('sent_today', 0), a['daily_limit'] or '不限', s.get('ready', 0),
+            sum(s.get(k, 0) for k in ('queued', 'researching', 'writing', 'imaging')), s.get('replied', 0), s.get('cost_today', 0),
+            a['activity'], ('\n       ⚠ ' + a['error']) if a['error'] else ''))
+    if st.get('legacy_running'):
+        print('⚠ 旧版开发信程序仍在运行（端口 %s），请关闭以免重复发信' % st['legacy_running'])
+    print('界面：' + URL)
+
+
 def cli(cmd, args):
+    cmd = {'开工': 'go', '收工': 'stop', '状态': 'status', '回复': 'replies'}.get(cmd, cmd)
     if cmd in ('help', '-h'):
         print(__doc__)
         return 0
-    if not running():
-        print('OutreachPilot 没有在运行，先执行：python3 app.py')
+    if cmd in ('go', 'open') and not ensure_running():
+        print('后台服务启动失败，查看日志：%s' % (config.data_dir() / 'app.log'))
         return 1
-    if cmd == 'status':
-        for a in call('/api/state')['accounts']:
-            s = a['stats']
-            print('%-8s %-6s 今日已发 %s/%s  待发 %s  已回复 %s  今日费用 $%s  | %s' % (
-                a['id'], '暂停' if a['paused'] else '运行', s.get('sent_today', 0), a['daily_limit'] or '不限', s.get('ready', 0),
-                s.get('replied', 0), s.get('cost_today', 0), a['activity']))
+    if not running():
+        print('OutreachPilot 没有在运行。一键开工：outreach go')
+        return 1
+    if cmd == 'go':
+        call('/api/start', {'account': args[0]} if args else {})
+        import time
+        time.sleep(2)
+        print('已开工 ✓')
+        print_status()
+    elif cmd == 'stop':
+        call('/api/pause', {'account': args[0]} if args else {})
+        print('已暂停所有账号（后台仍在检查回复）。继续：outreach go')
+    elif cmd == 'open':
+        open_window()
+    elif cmd == 'replies':
+        for l in call('/api/leads?status=replied&limit=%s' % (args[0] if args else 10))['items']:
+            d = call('/api/lead/%d' % l['id'])
+            print('■ %s <%s>（%s）\n  %s\n' % (l['company'], l['email'], l['account'], (d.get('reply_excerpt') or '').strip()[:500].replace('\n', '\n  ')))
+    elif cmd == 'status':
+        print_status()
     elif cmd in ('start', 'pause'):
         call('/api/' + cmd, {'account': args[0]} if args else {})
         print('ok')

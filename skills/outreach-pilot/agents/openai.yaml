@@ -1,4 +1,4 @@
 interface:
-  display_name: "OutreachPilot"
-  short_description: "Run AI cold outreach across several mailboxes with per-email cost tracking"
-  default_prompt: "Use $outreach-pilot to check my outreach status and today's costs."
+  display_name: "OutreachPilot 开发客户"
+  short_description: "一句话开工：自动找客户、写开发信、生成效果图、发送并跟踪回复"
+  default_prompt: "Use $outreach-pilot to 开工 and tell me the status."

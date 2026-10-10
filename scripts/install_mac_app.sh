@@ -60,3 +60,17 @@ iconutil -c icns "$TMP/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns
 rm -rf "$TMP"
 touch "$APP"
 echo "已生成：$APP"
+
+# Global command for terminals and AI agents (Codex / Claude Code / any shell): `outreach go`
+BIN="$HOME/.local/bin"
+mkdir -p "$BIN"
+cat > "$BIN/outreach" <<SHIM
+#!/bin/bash
+exec "$PY" "$ROOT/app.py" "\$@"
+SHIM
+chmod +x "$BIN/outreach"
+echo "已安装命令：$BIN/outreach   （试试：outreach go）"
+case ":$PATH:" in *":$BIN:"*) ;; *) echo "提示：把 $BIN 加入 PATH，例如 echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.zshrc";; esac
+
+# Skill for Codex and Claude Code
+"$PY" "$SRC/scripts/install_skill.py" --root "$ROOT" || true
