@@ -53,12 +53,12 @@ def api_state(_q):
         w = WORKERS.get(a['id'])
         accounts.append(dict(id=a['id'], name=a.get('name') or a['id'], sender=a['sender'], profile=a.get('profile', 'packaging'),
                              paused=w.paused if w else True, activity=w.activity if w else '', error=w.error if w else '',
-                             stats=store.stats(a['id']), auto_send=a.get('auto_send', True), daily_limit=a.get('daily_limit', 40),
+                             stats=store.stats(a['id']), auto_send=a.get('auto_send', True), daily_limit=int(a.get('daily_limit') or 0),
                              color=a.get('color', '')))
     conns = cfg['connections']
     ready = all(sec['keys'].get(s.get('connection')) or conns.get(s.get('connection'), {}).get('preset') == 'codex'
                 for s in cfg['stages'].values())
-    return dict(version=VERSION, accounts=accounts, api_ready=ready, legacy=store.get('legacy_imported'),
+    return dict(version=VERSION, accounts=accounts, api_ready=ready, daily_limit_total=int(cfg.get('daily_limit_total') or 0), legacy=store.get('legacy_imported'),
                 data_dir=str(config.data_dir()), legacy_running=legacy_running(cfg.get('legacy', {}).get('ports', [])))
 
 
@@ -82,6 +82,7 @@ def api_settings_get(_q):
     sec = config.secrets()
     return dict(connections=cfg['connections'], stages=cfg['stages'], accounts=cfg['accounts'],
                 api_presets=cfg['api_presets'], mail_presets=cfg['mail_presets'], inbox_check_minutes=cfg.get('inbox_check_minutes', 10),
+                daily_limit_total=int(cfg.get('daily_limit_total') or 0),
                 has_key={k: bool(sec['keys'].get(k)) for k in cfg['connections']},
                 has_password={a['id']: bool(sec['passwords'].get(a['id'])) or bool(a.get('keychain_service')) for a in cfg['accounts']},
                 profiles=config.profiles(), version=VERSION)
@@ -154,7 +155,7 @@ def api_redo(data):
 
 
 def api_settings_post(data):
-    patch = {k: data[k] for k in ('connections', 'stages', 'inbox_check_minutes') if k in data}
+    patch = {k: data[k] for k in ('connections', 'stages', 'inbox_check_minutes', 'daily_limit_total') if k in data}
     if 'accounts' in data:
         seen = set()
         for a in data['accounts']:

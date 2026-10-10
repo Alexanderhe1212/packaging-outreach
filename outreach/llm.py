@@ -24,10 +24,11 @@ _UNSUPPORTED = {}   # (connection, model) -> set of features the endpoint reject
 
 
 class AIError(RuntimeError):
-    def __init__(self, message, status=None, fatal=False):
+    def __init__(self, message, status=None, fatal=False, setup=False):
         super().__init__(message)
         self.status = status
         self.fatal = fatal  # bad key / no quota: pause the account instead of retrying forever
+        self.setup = setup  # not configured yet: wait and start by itself once settings are saved
 
 
 def _ctx():
@@ -131,7 +132,7 @@ def connection_info(name, cfg=None):
     cfg = cfg or config.load()
     conn = dict(cfg['connections'].get(name) or {})
     if not conn:
-        raise AIError('没有名为 %s 的 API 连接（设置 → AI 接口）' % name, fatal=True)
+        raise AIError('没有名为 %s 的 API 连接（设置 → AI 接口）' % name, fatal=True, setup=True)
     preset = cfg.get('api_presets', {}).get(conn.get('preset'), {})
     conn.setdefault('kind', preset.get('kind', 'openai'))
     conn['base_url'] = (conn.get('base_url') or preset.get('base_url') or '').rstrip('/')
@@ -154,11 +155,11 @@ class Stage:
         self.model = (self.opts.get('model') or '').strip()
         self.timeout = float(self.opts.get('timeout', 300))
         if not self.model:
-            raise AIError('阶段 %s 没有设置模型' % stage, fatal=True)
+            raise AIError('阶段 %s 没有设置模型' % stage, fatal=True, setup=True)
         if self.kind != 'codex' and not self.conn['key'] and not self.conn['preset_info'].get('nokey'):
-            raise AIError('还没有填写「%s」连接的 API Key（设置 → AI 接口）' % self.conn['name'], fatal=True)
+            raise AIError('还没有填写「%s」连接的 API Key（设置 → AI 接口）' % self.conn['name'], fatal=True, setup=True)
         if self.kind != 'codex' and not self.conn['base_url']:
-            raise AIError('「%s」连接没有填写 Base URL' % self.conn['name'], fatal=True)
+            raise AIError('「%s」连接没有填写 Base URL' % self.conn['name'], fatal=True, setup=True)
 
     # ---------- bookkeeping ----------
     @property

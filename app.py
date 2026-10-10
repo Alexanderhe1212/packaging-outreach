@@ -66,7 +66,7 @@ def cli(cmd, args):
         for a in call('/api/state')['accounts']:
             s = a['stats']
             print('%-8s %-6s 今日已发 %s/%s  待发 %s  已回复 %s  今日费用 $%s  | %s' % (
-                a['id'], '暂停' if a['paused'] else '运行', s.get('sent_today', 0), a['daily_limit'], s.get('ready', 0),
+                a['id'], '暂停' if a['paused'] else '运行', s.get('sent_today', 0), a['daily_limit'] or '不限', s.get('ready', 0),
                 s.get('replied', 0), s.get('cost_today', 0), a['activity']))
     elif cmd in ('start', 'pause'):
         call('/api/' + cmd, {'account': args[0]} if args else {})

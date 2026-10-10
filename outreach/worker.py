@@ -59,7 +59,11 @@ class AccountWorker(threading.Thread):
             except KeyError:  # account removed in settings
                 self.stopped = True
             except (llm.AIError, mailer.MailAuthError) as e:
-                if isinstance(e, mailer.MailAuthError) or e.fatal:
+                if getattr(e, 'setup', False):
+                    self.error = ''
+                    self.activity = '等待设置：' + str(e)
+                    self.sleep(30)  # saving settings wakes the worker immediately
+                elif isinstance(e, mailer.MailAuthError) or e.fatal:
                     self.error = str(e)
                     self.set_paused(True)
                     self.activity = '已自动暂停：' + str(e)
@@ -104,13 +108,23 @@ class AccountWorker(threading.Thread):
             return self.prepare_one()
         if not auto:
             self.activity = '已备好 %d 封，等你在列表里审核发送' % store.count(self.id, 'ready')
-        elif store.sent_today(self.id) >= int(acc.get('daily_limit', 40)):
-            self.activity = '今日已发满 %s 封，明天自动继续' % acc.get('daily_limit', 40)
+        elif self.limit_reached(acc):
+            self.activity = '今日已达发送上限，明天自动继续'
         elif not self.in_hours(acc):
             self.activity = '不在发送时段（北京时间 %s 点），已备好 %d 封' % ('–'.join(map(str, acc['send_hours_beijing'])), store.count(self.id, 'ready'))
         else:
             self.activity = '下一封 %d 分 %02d 秒后发送' % (wait // 60, wait % 60)
         self.sleep(min(max(wait, 5), 30))
+
+    def limit_reached(self, acc):
+        """Per-account cap (0 / empty = unlimited) and an optional cap for all accounts together."""
+        mine = int(acc.get('daily_limit') or 0)
+        if mine and store.sent_today(self.id) >= mine:
+            return True
+        total = int(config.load().get('daily_limit_total') or 0)
+        if total and sum(store.sent_today(a['id']) for a in config.load()['accounts']) >= total:
+            return True
+        return False
 
     def in_hours(self, acc):
         hours = acc.get('send_hours_beijing')
@@ -120,7 +134,7 @@ class AccountWorker(threading.Thread):
         return start <= h < end if start < end else (h >= start or h < end)
 
     def send_wait(self, acc):
-        if store.sent_today(self.id) >= int(acc.get('daily_limit', 40)) or not self.in_hours(acc):
+        if self.limit_reached(acc) or not self.in_hours(acc):
             return 600
         return max(0, int(store.get('next_send_' + self.id, 0) - time.time()))
 
