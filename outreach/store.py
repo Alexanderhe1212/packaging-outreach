@@ -180,7 +180,14 @@ def add_candidates(account, items):
             state = 'backlog' if tier in ('B','C') or item.get('capability_status') == 'needs_confirmation' else 'new'
             cur = c.execute('INSERT OR IGNORE INTO candidates(domain,account,brand,note,created_at,status) VALUES(?,?,?,?,?,?)',
                             (d, account, str(item.get('brand', ''))[:120], json.dumps({k:str(item.get(k,''))[:1500] for k in fields}, ensure_ascii=False), time.time(), state))
-            added += cur.rowcount if state == 'new' else 0
+            inserted=cur.rowcount
+            if not inserted:
+                existing=c.execute('SELECT status FROM candidates WHERE domain=?',(d,)).fetchone()
+                if existing and existing['status'] not in ('new','researching'):
+                    c.execute('UPDATE candidates SET account=?,brand=?,note=?,created_at=?,status=?,reason=? WHERE domain=?',
+                        (account,str(item.get('brand',''))[:120],json.dumps({k:str(item.get(k,''))[:1500] for k in fields},ensure_ascii=False),time.time(),state,'refreshed source after eligibility check',d))
+                    inserted=1
+            added += inserted if state == 'new' else 0
             c.commit()
     return added
 
@@ -209,7 +216,7 @@ def mark_candidate(domain, status, reason=''):
 
 
 def recent_candidate_domains(account, limit=40):
-    return [r['domain'] for r in q('SELECT domain FROM candidates WHERE account=? ORDER BY created_at DESC LIMIT ?', (account, limit))]
+    return [r['domain'] for r in q('SELECT domain FROM candidates WHERE created_at>? ORDER BY created_at DESC LIMIT ?', (time.time()-COOLDOWN_SECONDS, limit))]
 
 
 # ---------- dedupe / suppression ----------
@@ -218,44 +225,28 @@ def suppress(value, kind, account='', note=''):
         x('INSERT OR REPLACE INTO suppress VALUES(?,?,?,?,?)', (value.lower(), kind, account, note[:300], time.time()))
 
 
+COOLDOWN_SECONDS = 7 * 24 * 60 * 60
+
+
 def shared():
-    """Accounts are fully separate unless the user turns on the cross-account lock in settings."""
-    return bool(config.load().get('cross_account_dedupe', False))
+    """The rolling contact window and safety exclusions always span all accounts."""
+    return True
 
 
 def _scope(account):
-    if not account or shared():
-        return '', []
-    return ' AND account IN (?, \'\')', [account]
+    return '', []
 
 
 def blocked(email='', domain='', account=''):
-    """True when this address/company was already contacted by this account (or by any account if the lock is on),
-    is being prepared, or opted out. Entries imported without an account (CSV / constraints) apply to every account."""
-    from .web import root_domain
-    vals = [v.lower() for v in (email, domain, root_domain(domain) if domain else '') if v]
-    if not vals:
+    if not email and not domain:
         return False
-    extra, args = _scope(account)
-    marks = ','.join('?' for _ in vals)
-    if q('SELECT 1 FROM suppress WHERE value IN (' + marks + ')' + extra + ' LIMIT 1', vals + args):
-        return True
-    lextra = ' AND account=?' if account and not shared() else ''
-    largs = [account] if lextra else []
-    if domain and q("SELECT 1 FROM leads WHERE domain IN (?,?) AND status NOT IN ('skipped','failed')" + lextra + " LIMIT 1",
-                    [domain.lower(), root_domain(domain)] + largs):
-        return True
-    if email and q("SELECT 1 FROM leads WHERE email=? AND status NOT IN ('skipped','failed')" + lextra + " LIMIT 1",
-                   [email.lower()] + largs):
-        return True
-    return False
+    with _lock:
+        return bool(_conflict(db(), dict(id=-1,email=email,domain=domain,company=''), preparation=True))
 
 
 def hard_blocked(email, account=''):
-    """Opt-out / bounce / reply / unresolved-unknown only (a manual lead may override ordinary dedupe)."""
-    extra, args = _scope(account)
-    return bool(q("SELECT 1 FROM suppress WHERE value=? AND kind IN ('unsubscribe','bounce','hard_reject','unknown','reply')"
-                  + extra + " LIMIT 1", [(email or '').lower()] + args))
+    # Replies require context review; elapsed time never overrides exclusions.
+    return bool(q('SELECT 1 FROM suppress WHERE lower(trim(value))=? LIMIT 1', [(email or '').strip().lower()]))
 
 
 def recent_structures(account, limit=10):
@@ -346,26 +337,106 @@ def audit(event, account='', lid=None, origin=None, result=''):
         c = db(); _audit(c, event, account, lid, origin, result); c.commit()
 
 
-def _conflict(c, row, preparation=False):
-    keys = identity_keys(row['email'], row['domain'], row['company'])
-    vals = {row['email'].strip().lower(), row['domain'].strip().lower()}
-    vals.update(k[7:] for k in keys if k.startswith('domain:'))
-    # Safety suppression always applies across accounts, including old per-account rows.
-    if any(r['value'].strip().lower() in vals for r in c.execute('SELECT value FROM suppress')):
+def _data(row):
+    value = dict(row).get('data') or '{}'
+    return value if isinstance(value,dict) else json.loads(value)
+
+
+def last_contact(c, row):
+    row = dict(row)
+    attempt = c.execute("SELECT MAX(finished) ts FROM send_attempts WHERE lead=? AND result='sent'", (row['id'],)).fetchone()
+    return max(float(row.get('sent_at') or 0), float(row.get('followup_at') or 0), float(attempt['ts'] or 0))
+
+
+def _record_hold(c, row, now):
+    row = dict(row)
+    data = _data(row)
+    policy = data.get('contact_policy') or {}
+    if policy.get('paused') or data.get('customer_paused'):
+        return 'customer_paused'
+    until = policy.get('recontact_after') or data.get('recontact_after')
+    if until:
+        try:
+            when = float(until)
+        except (ValueError,TypeError):
+            try: when = datetime.fromisoformat(str(until).replace('Z','+00:00')).timestamp()
+            except (ValueError,TypeError): return 'future_contact'
+        if now < when: return 'future_contact'
+    if row.get('status') in ('unknown','bounced','unsubscribed','rejected'):
         return 'suppressed'
-    for other in c.execute("SELECT id,email,domain,company,status,reply_at,message_id FROM leads WHERE id<>? AND status NOT IN ('skipped','failed')", (row['id'],)):
-        if not (identity_keys(other['email'], other['domain'], other['company']) & keys):
-            continue
-        # Earlier queued prospect owns an alias; a previously contacted prospect always wins.
-        if preparation or other['id'] < row['id'] or other['message_id'] or other['reply_at'] or other['status'] in ('sending','unknown','sent','replied','bounced','unsubscribed'):
+    if row.get('reply_at') or row.get('status') == 'replied':
+        return 'reply_context_required'
+    if c.execute("SELECT 1 FROM send_attempts WHERE lead=? AND result='unknown' LIMIT 1", (row['id'],)).fetchone():
+        return 'unknown'
+    contacted = last_contact(c,row)
+    if contacted and now - contacted < COOLDOWN_SECONDS:
+        return 'cooldown'
+    if row.get('status') == 'sent' and not contacted:
+        return 'history_time_unknown'
+    return ''
+
+
+def _conflict(c, row, preparation=False):
+    row = dict(row);now=time.time()
+    keys = identity_keys(row['email'], row['domain'], row['company'])
+    vals = {row['email'].strip().casefold(), row['domain'].strip().casefold()}
+    vals.update(k[7:] for k in keys if k.startswith('domain:'))
+    for entry in c.execute('SELECT value FROM suppress'):
+        value=entry['value'].strip().casefold()
+        skeys=identity_keys(email=value) if '@' in value else identity_keys(domain=value,company=value)
+        if value in vals or keys & skeys: return 'suppressed'
+    own=c.execute('SELECT * FROM leads WHERE id=?',(row['id'],)).fetchone()
+    if own:
+        reason=_record_hold(c,own,now)
+        if reason:return reason
+    active=set(ACTIVE) | {'ready','sending'}
+    for other in c.execute('SELECT * FROM leads WHERE id<>?', (row['id'],)):
+        if not (identity_keys(other['email'],other['domain'],other['company']) & keys):continue
+        reason=_record_hold(c,other,now)
+        if reason:return reason
+        if other['status'] in active and (preparation or other['id'] < row['id'] or other['status']=='sending'):
             return 'duplicate'
     for key in keys:
-        owner = c.execute('SELECT lead FROM identity_claims WHERE key=?', (key,)).fetchone()
-        if owner and owner['lead'] != row['id']:
-            r = c.execute('SELECT status FROM leads WHERE id=?', (owner['lead'],)).fetchone()
-            if r and r['status'] not in ('failed', 'skipped'):
-                return 'claimed'
+        owner=c.execute('SELECT lead FROM identity_claims WHERE key=?',(key,)).fetchone()
+        if not owner or owner['lead']==row['id']:continue
+        other=c.execute('SELECT * FROM leads WHERE id=?',(owner['lead'],)).fetchone()
+        if other:
+            reason=_record_hold(c,other,now)
+            if reason:return reason
+            if other['status'] in active:return 'claimed'
     return ''
+
+
+def queue_recontact(account):
+    """Create one fresh draft from verified facts; never rewrite sent history or reuse its email."""
+    import copy
+    with _lock:
+        c=db();c.execute('BEGIN IMMEDIATE')
+        try:
+            candidates=c.execute("SELECT * FROM leads WHERE account=? AND status='sent' ORDER BY sent_at DESC",(account,)).fetchall()
+            profile=config.profile(config.account(account).get('profile','packaging'))
+            recent_reviews=[_data(r).get('prior_contact',{}).get('lead_id') for r in c.execute("SELECT data FROM leads WHERE source='recontact' AND created_at>?",(time.time()-COOLDOWN_SECONDS,))]
+            for old in candidates:
+                if old['id'] in recent_reviews:continue
+                if _record_hold(c,old,time.time()):continue
+                data=_data(old);prospect=data.get('prospect') or {}
+                if not prospect.get('email_verified'):continue
+                if profile.get('discovery_rules') and (prospect.get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):continue
+                row=dict(id=-1,email=old['email'],domain=old['domain'],company=old['company'])
+                if _conflict(c,row,preparation=True):continue
+                now=time.time();prospect=copy.deepcopy(prospect)
+                prior={'lead_id':old['id'],'sent_at':last_contact(c,old),'subject':old['subject'],'body':old['body'][:2000]}
+                prospect['prior_contact']=prior
+                fresh={'prospect':prospect,'prior_contact':prior,'revalidate_opportunity':True}
+                cur=c.execute('INSERT INTO leads(account,status,source,company,domain,email,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (account,'queued','recontact',old['company'],old['domain'],old['email'],json.dumps(fresh,ensure_ascii=False),now,now))
+                lid=cur.lastrowid
+                for key in identity_keys(old['email'],old['domain'],old['company']):c.execute('INSERT OR REPLACE INTO identity_claims VALUES(?,?)',(key,lid))
+                _audit(c,'recontact_queued',account,lid,{'source':'scheduler'},'verified_facts_reused')
+                c.commit();return lid
+            c.commit();return None
+        except Exception:
+            c.rollback();raise
 
 
 def claim_prospect(account, prospect, source='auto', lid=None, manual=None):

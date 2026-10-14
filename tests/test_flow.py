@@ -221,9 +221,9 @@ class FlowTest(unittest.TestCase):
     def test_accounts_are_separate_and_concepts_vary(self):
         store.suppress('only-mtt@brand-x.com', 'legacy_contacted', 'MTT')
         self.assertTrue(store.blocked('only-mtt@brand-x.com', account='MTT'))
-        self.assertFalse(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'accounts do not share history')
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'safety exclusions always span accounts')
         config.save({'cross_account_dedupe': True})
-        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'optional cross-account lock')
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'shared rolling contact lock')
         config.save({'cross_account_dedupe': False})
         lid = store.add_lead('MTT', 'sent', data={'plan': {'a': {'structure': 'magnetic flap rigid box'}, 'b': {'structure': 'drawer / slide box'}}})
         note = pipeline.variety_note(config.account('MTT'), config.profile('packaging'))

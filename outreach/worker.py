@@ -173,6 +173,9 @@ class AccountWorker(threading.Thread):
         acc, prof = self.acc, self.profile
         lead = store.next_lead(self.id, ('queued',))
         if lead is None:
+            recycled=store.queue_recontact(self.id)
+            lead=store.lead(recycled) if recycled else None
+        if lead is None:
             cand = store.claim_candidate(self.id)
             if cand is None:
                 self.activity = '寻找一批新客户…'
@@ -234,11 +237,18 @@ class AccountWorker(threading.Thread):
                     return
                 store.update(lid, company=p['company'], domain=p['domain'], email=p['email'], data=d)
             p = d['prospect']
+            if d.get('revalidate_opportunity') and prof.get('discovery_rules'):
+                from .opportunity import verify
+                evidence=p.get('discovery_evidence') or {}
+                verify(evidence)
+                p['discovery_evidence']=evidence
+                d['revalidate_opportunity']=False
+                store.update(lid,data=d)
             if prof.get('discovery_rules') and (p.get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
                 store.update(lid, status='backlog', error='当前项目采购证据待核实；保留后备')
                 return
             name = p.get('customer_brand') or p['company']
-            if photo is None and p.get('product_image_url'):
+            if photo is None and p.get('product_image_url') and prof.get('image',{}).get('enabled',True):
                 photo, _ = web.product_image(p['product_image_url'])
             if self.paused:
                 store.update(lid,status='queued',data=d)
@@ -323,7 +333,7 @@ class AccountWorker(threading.Thread):
         enabled = acc.get('followup_enabled', fu.get('enabled', False))
         if not enabled:
             return None
-        days = float(acc.get('followup_days', fu.get('days', 5)))
+        days = max(7, float(acc.get('followup_days', fu.get('days', 5))))
         r = store.q("SELECT id FROM leads WHERE account=? AND status='sent' AND followups=0 AND reply_at IS NULL "
                     "AND message_id!='' AND sent_at<? ORDER BY sent_at LIMIT 1", (self.id, time.time() - days * 86400), one=True)
         return store.lead(r['id']) if r else None

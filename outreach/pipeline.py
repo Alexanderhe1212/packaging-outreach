@@ -153,7 +153,7 @@ def research_with_ai(account, url, email_hint):
 
 def facts_for_prompt(p):
     keep = {k: p.get(k) for k in ('customer_brand', 'country', 'site_description', 'product_name', 'product_price',
-                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal', 'discovery_evidence') if p.get(k)}
+                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal', 'discovery_evidence', 'prior_contact') if p.get(k)}
     return json.dumps(keep, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -223,6 +223,8 @@ def writer_prompts(account, profile, p, has_photo):
     if profile.get('discovery_rules'):
         system += '\nFIRST CONTACT OVERRIDE: establish that the sourcing project and supplier window are current before engineering or quotation. Write a natural 45-80 word English email with one verified project fact, one relevant identity sentence and exactly ONE short question. For tier A ask only whether suppliers/quotes are still being considered. Do not claim an A/B image is attached or already created. No specs checklist, pricing, MOQ or delivery promises. The a/b JSON fields may be empty; no image is needed at this stage.'
         user = 'Write a short project/window confirmation using only these verified facts: ' + facts_for_prompt(p)
+    if p.get('prior_contact'):
+        system += '\nRECONTACT: This is an existing contact after the shared 7-day window, not a first introduction. Use prior_contact context. Do not repeat the previous body or claim a new/current purchase need without evidence. Add one useful, specific new angle and one easy question. Replies or future-contact agreements require review before entering this queue.'
     return system, user
 
 
@@ -246,6 +248,9 @@ def write(account, profile, p, photo):
     plan['body'] = clean_body(plan.get('body'), account)
     if not plan['subject'] or len(plan['body']) < 120:
         raise ValueError('邮件内容不完整')
+    prior=(p.get('prior_contact') or {}).get('body','')
+    if prior and re.sub(r'\W+','',prior).casefold()==re.sub(r'\W+','',plan['body']).casefold():
+        raise ValueError('不可原文重复发送上次邮件')
     others = [a.get('company_name', '') for a in config.load()['accounts'] if a['id'] != account['id']]
     text = (plan['subject'] + plan['body']).lower()
     for o in others:

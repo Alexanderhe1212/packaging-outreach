@@ -85,7 +85,7 @@ def api_settings_get(_q):
     sec = config.secrets()
     return dict(connections=cfg['connections'], stages=cfg['stages'], accounts=cfg['accounts'],
                 api_presets=cfg['api_presets'], mail_presets=cfg['mail_presets'], inbox_check_minutes=cfg.get('inbox_check_minutes', 10),
-                daily_limit_total=int(cfg.get('daily_limit_total') or 0), cross_account_dedupe=bool(cfg.get('cross_account_dedupe', False)),
+                daily_limit_total=int(cfg.get('daily_limit_total') or 0), cross_account_dedupe=True,
                 has_key={k: bool(sec['keys'].get(k)) for k in cfg['connections']},
                 has_password={a['id']: bool(sec['passwords'].get(a['id'])) or bool(a.get('keychain_service')) for a in cfg['accounts']},
                 profiles=config.profiles(), version=VERSION)
@@ -95,6 +95,7 @@ def api_settings_get(_q):
 def control(data, paused):
     for aid in ([data['account']] if data.get('account') else list(WORKERS)):
         worker(aid).set_paused(paused)
+        store.audit('account_paused' if paused else 'account_started',aid,origin=data.get('_origin'),result='paused' if paused else 'running')
     return {'ok': True}
 
 
@@ -127,7 +128,7 @@ def api_send(data):
     messages={'changed':'草稿已更新，请重新审核','interval':'发送间隔尚未到，请稍后审核发送','paused':'账号已暂停','daily_limit':'今日发送额度已满',
               'total_limit':'今日总发送额度已满','not_ready':'当前状态不可发送','duplicate':'重复公司或邮箱，已阻止',
               'suppressed':'已退订、退信或回复，已阻止','claimed':'另一条记录已认领此客户','sending':'该账号有发送事务进行中',
-              'outside_hours':'当前不在发送时段','already_contacted':'已联系，禁止重复发送','account_mismatch':'账号不匹配'}
+              'cooldown':'最近联系未满7天','reply_context_required':'客户已回复，需先核实对话','customer_paused':'客户已暂停联系','future_contact':'尚未到约定联系时间','unknown':'历史发送结果待核实','outside_hours':'当前不在发送时段','already_contacted':'已联系，禁止重复发送','account_mismatch':'账号不匹配'}
     if result not in ('sent','unknown','bounced','retry','blocked'):
         raise ValueError(messages.get(result,result))
     return {'result': result, 'lead': api_lead(lead['id'])}
@@ -183,6 +184,7 @@ def api_settings_post(data):
                 raise ValueError('账号代号重复：' + a['id'])
             seen.add(a['id'])
         patch['accounts'] = data['accounts']
+    patch['cross_account_dedupe']=True
     if patch:
         config.save(patch)
     config.save_secrets(keys=data.get('keys'), passwords=data.get('passwords'))
