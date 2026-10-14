@@ -31,10 +31,10 @@ outreach stop      # 收工
 ## 安装
 
 ```bash
-git clone https://github.com/Alexanderhe1212/packaging-outreach ~/OutreachPilot
-cd ~/OutreachPilot
+git clone https://github.com/Alexanderhe1212/packaging-outreach "$HOME/Outsearch Pilot"
+cd "$HOME/Outsearch Pilot"
 python3 app.py                       # 启动并打开窗口
-bash scripts/install_mac_app.sh      # macOS：桌面 OutreachPilot.app + 全局 outreach 命令 + Codex/Claude Skill
+bash scripts/install_mac_app.sh      # macOS：桌面 Outsearch Pilot.app + 全局 outreach 命令 + Codex/Claude Skill
 ```
 Windows 双击 `start.bat`；Linux 运行 `./start.sh`。
 
@@ -95,3 +95,13 @@ python3 -m unittest discover -s tests -v   # 离线端到端测试：假 AI 接�
 结构：`outreach/llm.py` 统一 AI 接口 · `web.py` 官网抓取 · `pipeline.py` 找客户/写信/生图 · `worker.py` 每账号一个线程 · `mailer.py` SMTP/IMAP · `store.py` SQLite · `server.py` 本机 API · `ui/index.html` 界面。
 
 MIT License
+
+### Repair 1.3.1 (2026-10-14)
+
+Accounts now prepare independently. Candidate and company/email/domain claims are atomic. Every send path, including the UI button and follow-ups, uses the same paused-state, interval, quota, suppression and duplicate gate. A durable `sending` reservation precedes SMTP; interrupted reservations become `unknown` and are never automatically retried. Inbox suppression is shared across accounts. HTTP callers can identify `X-Outreach-Source: ui|cli|review-agent`; `/api/audit` exposes the latest bounded operational events (no message bodies or credentials). A source label is diagnostic metadata, not authenticated human identity.
+
+The desktop applet starts a background service and opens the browser without Terminal. Startup and service locks prevent duplicate processes. `launcher.log` and `app.log` are in the application data directory. The installer preserves a previous app in the local backup folder outside the Desktop. Opening the app does not start paused accounts or enable automatic sending.
+
+Search now requires an official public business/general contact, a named physical product and a product image. Fit inferences are distinguished from confirmed purchase intent. Generated concepts still require individual human/agent review before sending; budget or buying dates are not invented.
+
+See [macOS installation and recovery](docs/mac-install-recovery.md) for a clean install, private local backups, and safe recovery.

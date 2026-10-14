@@ -2,6 +2,9 @@
 import json
 import sqlite3
 import threading
+import re
+import unicodedata
+import uuid
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -31,6 +34,14 @@ CREATE TABLE IF NOT EXISTS usage(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, 
   stage TEXT, model TEXT, input INTEGER, output INTEGER, cached INTEGER, images INTEGER, searches INTEGER, cost REAL);
 CREATE INDEX IF NOT EXISTS usage_day ON usage(day);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS send_attempts(
+ id TEXT PRIMARY KEY, lead INTEGER, account TEXT, started REAL, finished REAL,
+ result TEXT, message_id TEXT, source TEXT, request_id TEXT, peer TEXT, followup INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS audit(
+ id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, event TEXT, account TEXT, lead INTEGER,
+ source TEXT, request_id TEXT, peer TEXT, result TEXT);
+CREATE TABLE IF NOT EXISTS identity_claims(key TEXT PRIMARY KEY, lead INTEGER);
+
 '''
 ACTIVE = ('queued', 'researching', 'writing', 'imaging')
 CONTACTED = ('sent', 'unknown', 'replied', 'bounced', 'unsubscribed')
@@ -147,28 +158,47 @@ def list_leads(account=None, status=None, limit=100, offset=0, search=''):
 
 def reset_interrupted():
     """After a restart, half-finished leads go back to the queue (finished parts are kept in data)."""
-    x("UPDATE leads SET status='queued' WHERE status IN ('researching','writing','imaging')")
+    with _lock:
+        x("UPDATE leads SET status='unknown', sent_at=COALESCE(sent_at,updated_at), error='进程中断：发送状态需人工核实，禁止自动重试' WHERE status='sending'")
+        x("UPDATE send_attempts SET result='unknown',finished=? WHERE result='sending'", (time.time(),))
+        x("UPDATE leads SET status='queued' WHERE status IN ('researching','writing','imaging')")
+        x("UPDATE candidates SET status='new' WHERE status='researching'")
 
 
 # ---------- candidates (cheap list of domains to crawl) ----------
 def add_candidates(account, items):
     added = 0
-    for c in items:
-        d = (c.get('domain') or '').lower().strip()
-        if d.startswith('www.'):
-            d = d[4:]
-        if not d or '.' not in d or blocked(domain=d, account=account):
-            continue
-        if q('SELECT 1 FROM candidates WHERE domain=?', (d,)):
-            continue
-        x('INSERT INTO candidates(domain,account,brand,note,created_at) VALUES(?,?,?,?,?)',
-          (d, account, str(c.get('brand', ''))[:80], str(c.get('note', ''))[:200], time.time()))
-        added += 1
+    with _lock:
+        for item in items:
+            from .web import root_domain
+            d = root_domain((item.get('domain') or '').lower().strip())
+            if not d or '.' not in d or blocked(domain=d, account=account):
+                continue
+            c = db()
+            cur = c.execute('INSERT OR IGNORE INTO candidates(domain,account,brand,note,created_at) VALUES(?,?,?,?,?)',
+                            (d, account, str(item.get('brand', ''))[:120], json.dumps({k:str(item.get(k,''))[:1500] for k in ('brand','domain','product_url','match_reason','signal_type','signal_source','note')}, ensure_ascii=False), time.time()))
+            added += cur.rowcount
+            c.commit()
     return added
 
 
 def next_candidate(account):
     return q("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY created_at LIMIT 1", (account,), one=True)
+
+
+def claim_candidate(account):
+    with _lock:
+        c = db()
+        c.execute('BEGIN IMMEDIATE')
+        try:
+            r = c.execute("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY created_at LIMIT 1", (account,)).fetchone()
+            if r:
+                c.execute("UPDATE candidates SET status='researching' WHERE domain=?", (r['domain'],))
+            c.commit()
+            return dict(r) if r else None
+        except Exception:
+            c.rollback()
+            raise
 
 
 def mark_candidate(domain, status, reason=''):
@@ -284,3 +314,161 @@ def stats(account):
     s['cost_today'] = round(c['c'] or 0, 3)
     s['tokens_today'] = c['t'] or 0
     return s
+
+
+# Shared final gate. Transactions contain only local decisions, never network I/O.
+def identity_keys(email='', domain='', company=''):
+    from .web import root_domain
+    keys = set()
+    if email:
+        keys.add('email:' + email.strip().casefold())
+    if domain:
+        keys.add('domain:' + root_domain(domain.strip().lower()))
+    name = re.sub(r'[^\w]', '', unicodedata.normalize('NFKC', company).casefold())
+    if name:
+        keys.add('company:' + name)
+    return keys
+
+
+def _audit(c, event, account, lid, origin, result):
+    origin = origin or {}
+    # Only bounded operational metadata. Never headers, prompts, body or credentials.
+    c.execute('INSERT INTO audit(ts,event,account,lead,source,request_id,peer,result) VALUES(?,?,?,?,?,?,?,?)',
+              (time.time(), event, account, lid, str(origin.get('source', 'internal'))[:40],
+               str(origin.get('request_id', ''))[:40], str(origin.get('peer', ''))[:45], str(result)[:100]))
+
+
+def audit(event, account='', lid=None, origin=None, result=''):
+    with _lock:
+        c = db(); _audit(c, event, account, lid, origin, result); c.commit()
+
+
+def _conflict(c, row, preparation=False):
+    keys = identity_keys(row['email'], row['domain'], row['company'])
+    vals = {row['email'].strip().lower(), row['domain'].strip().lower()}
+    vals.update(k[7:] for k in keys if k.startswith('domain:'))
+    # Safety suppression always applies across accounts, including old per-account rows.
+    if any(r['value'].strip().lower() in vals for r in c.execute('SELECT value FROM suppress')):
+        return 'suppressed'
+    for other in c.execute("SELECT id,email,domain,company,status,reply_at,message_id FROM leads WHERE id<>? AND status NOT IN ('skipped','failed')", (row['id'],)):
+        if not (identity_keys(other['email'], other['domain'], other['company']) & keys):
+            continue
+        # Earlier queued prospect owns an alias; a previously contacted prospect always wins.
+        if preparation or other['id'] < row['id'] or other['message_id'] or other['reply_at'] or other['status'] in ('sending','unknown','sent','replied','bounced','unsubscribed'):
+            return 'duplicate'
+    for key in keys:
+        owner = c.execute('SELECT lead FROM identity_claims WHERE key=?', (key,)).fetchone()
+        if owner and owner['lead'] != row['id']:
+            r = c.execute('SELECT status FROM leads WHERE id=?', (owner['lead'],)).fetchone()
+            if r and r['status'] not in ('failed', 'skipped'):
+                return 'claimed'
+    return ''
+
+
+def claim_prospect(account, prospect, source='auto', lid=None, manual=None):
+    """Atomic brand/email/domain ownership after research, including redirects/aliases."""
+    with _lock:
+        c = db(); c.execute('BEGIN IMMEDIATE')
+        try:
+            row = dict(id=lid or -1, email=prospect.get('email',''), domain=prospect.get('domain',''), company=prospect.get('company',''))
+            reason = _conflict(c, row, preparation=True)
+            if reason:
+                c.rollback(); return None
+            now=time.time()
+            if lid is None:
+                data={'prospect':prospect} if not manual else {'manual':manual}
+                cur=c.execute('INSERT INTO leads(account,status,source,company,domain,email,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (account,'queued' if manual else 'writing',source,row['company'],row['domain'].lower(),row['email'].lower(),json.dumps(data,ensure_ascii=False),now,now))
+                lid=cur.lastrowid
+            for key in identity_keys(row['email'],row['domain'],row['company']):
+                c.execute('INSERT OR REPLACE INTO identity_claims VALUES(?,?)',(key,lid))
+            c.commit();return lid
+        except Exception:
+            c.rollback();raise
+
+
+def reserve_send(lid, acc, message_id, origin=None, followup=False, expected=None):
+    with _lock:
+        c=db();c.execute('BEGIN IMMEDIATE')
+        try:
+            row=c.execute('SELECT * FROM leads WHERE id=?',(lid,)).fetchone()
+            reason=''
+            if not row or row['account']!=acc['id']:reason='account_mismatch'
+            elif row['status'] != ('sent' if followup else 'ready'):reason='not_ready'
+            elif row['reply_at'] or (row['message_id'] and not followup):reason='already_contacted'
+            elif followup and (row['followups'] or not acc.get('followup_enabled',False)):reason='followup_disabled'
+            if not reason and expected and any(row[k]!=expected.get(k) for k in ('email','subject','body','image')):reason='changed'
+            if not reason:reason=_conflict(c,row)
+            def val(k,d=None):
+                r=c.execute('SELECT value FROM kv WHERE key=?',(k,)).fetchone();return json.loads(r['value']) if r else d
+            now=time.time()
+            if not reason and val('paused_'+acc['id'],True):reason='paused'
+            if not reason and c.execute("SELECT 1 FROM send_attempts WHERE account=? AND result='sending'",(acc['id'],)).fetchone():reason='sending'
+            if not reason and now<float(val('next_send_'+acc['id'],0)):reason='interval'
+            hours=acc.get('send_hours_beijing')
+            if not reason and hours:
+                h=datetime.now(BJ).hour;start,end=hours
+                if not (start<=h<end if start<end else h>=start or h<end):reason='outside_hours'
+            cfg=config.load()
+            def used(aid=None):
+                scope=' AND account=?' if aid else '';args=[day_start()]+([aid] if aid else [])
+                n=c.execute('SELECT count(*) n FROM leads WHERE sent_at>=?'+scope,args).fetchone()['n']
+                ids=[aid] if aid else [a['id'] for a in cfg['accounts']]
+                n+=sum(val('followups_%s_%s'%(a,today()),0) for a in ids)
+                n+=c.execute("SELECT count(*) n FROM send_attempts WHERE result='sending'"+scope,([aid] if aid else [])).fetchone()['n']
+                return n
+            if not reason and acc.get('daily_limit') and used(acc['id'])>=int(acc['daily_limit']):reason='daily_limit'
+            if not reason and cfg.get('daily_limit_total') and used()>=int(cfg['daily_limit_total']):reason='total_limit'
+            if reason:
+                _audit(c,'send_denied',acc['id'],lid,origin,reason);c.commit();return None,reason
+            token=uuid.uuid4().hex;origin=origin or {}
+            c.execute('INSERT INTO send_attempts(id,lead,account,started,result,message_id,source,request_id,peer,followup) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (token,lid,acc['id'],now,'sending',message_id,str(origin.get('source','internal'))[:40],str(origin.get('request_id',''))[:40],str(origin.get('peer',''))[:45],int(followup)))
+            c.execute("UPDATE leads SET status='sending',message_id=?,updated_at=? WHERE id=?",(message_id,now,lid))
+            for key in identity_keys(row['email'],row['domain'],row['company']):c.execute('INSERT OR REPLACE INTO identity_claims VALUES(?,?)',(key,lid))
+            _audit(c,'send_reserved',acc['id'],lid,origin,'sending');c.commit();return token,''
+        except Exception:
+            c.rollback();raise
+
+
+def transport_allowed(token):
+    with _lock:
+        c=db();a=c.execute('SELECT * FROM send_attempts WHERE id=?',(token,)).fetchone()
+        if not a or a['result']!='sending':return False
+        row=c.execute('SELECT * FROM leads WHERE id=?',(a['lead'],)).fetchone()
+        return bool(row and row['status']=='sending' and not row['reply_at'] and not _conflict(c,row) and not get('paused_'+a['account'],True))
+
+
+def finish_send(token,result,note,next_at):
+    with _lock:
+        c=db();c.execute('BEGIN IMMEDIATE')
+        try:
+            a=c.execute('SELECT * FROM send_attempts WHERE id=?',(token,)).fetchone()
+            if not a or a['result']!='sending':c.rollback();return
+            row=c.execute('SELECT * FROM leads WHERE id=?',(a['lead'],)).fetchone();now=time.time()
+            if result not in ('sent','unknown','bounced','retry','blocked','auth_error'):result='unknown'
+            status=result if result in ('sent','unknown','bounced') else ('sent' if a['followup'] else 'ready')
+            if result=='blocked':status='skipped'
+            # An inbox event arriving during transport must never be overwritten.
+            if row['status'] in ('replied','unsubscribed','bounced'):status=row['status']
+            sent_at=row['sent_at'];mid=row['message_id'];tries=row['tries']
+            if result in ('sent','unknown') and not a['followup']:sent_at=now
+            if result in ('retry','auth_error','blocked') and not a['followup']:mid=''
+            if result=='retry':
+                tries+=1
+                if tries>=3 and not a['followup']:status='failed'
+            c.execute('UPDATE leads SET status=?,sent_at=?,message_id=?,tries=?,error=?,updated_at=? WHERE id=?',
+                      (status,sent_at,mid,tries,note[:300],now,a['lead']))
+            if a['followup'] and result in ('sent','unknown','bounced'):
+                c.execute('UPDATE leads SET followups=1,followup_at=? WHERE id=?',(now,a['lead']))
+                key='followups_%s_%s'%(a['account'],today());v=c.execute('SELECT value FROM kv WHERE key=?',(key,)).fetchone()
+                c.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',(key,json.dumps((json.loads(v['value']) if v else 0)+1)))
+            if result in ('unknown','bounced'):
+                c.execute('INSERT OR REPLACE INTO suppress VALUES(?,?,?,?,?)',(row['email'].lower(),result,a['account'],note[:300],now))
+            if result in ('sent','unknown','retry','bounced'):
+                c.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',('next_send_'+a['account'],json.dumps(next_at)))
+            c.execute('UPDATE send_attempts SET result=?,finished=? WHERE id=?',(result,now,token))
+            _audit(c,'send_finished',a['account'],a['lead'],dict(source=a['source'],request_id=a['request_id'],peer=a['peer']),result)
+            c.commit()
+        except Exception:
+            c.rollback();raise

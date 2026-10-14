@@ -48,9 +48,13 @@ def discover(account, profile):
     letters = random.choice(['A-E', 'F-K', 'L-P', 'Q-T', 'U-Z', 'any letter'])
     searching = stage.can_search
     system = ('You find B2B prospects for %s. What we sell: %s\n'
-              'Return ONLY JSON: {"candidates":[{"brand":"Brand name","domain":"brand.com","note":"what they sell, 5-10 words"}]}\n'
+              'Return ONLY JSON: {"candidates":[{"brand":"Brand name","domain":"brand.com","product_url":"official named physical product URL","match_reason":"packaging fit","signal_type":"fit_inference or confirmed_procurement","signal_source":"official URL or empty","note":"brief product and dated evidence"}]}\n'
               'Rules: real, currently operating brands that sell physical products and have their own website/online store; '
-              'independent or small-to-mid DTC brands preferred. Exclude %s. The domain must be the brand\'s own official site '
+              'Prioritize perfume, skincare, jewelry, apparel/scarves, chocolate and physical gifting brands for rigid boxes, paper bags and mailer boxes. '
+              'Find a specific current physical product or project on the official website. Prefer recent launches, gift sets, packaging changes or explicit procurement notices; '
+              'in note record product URL, fit reason and dated signal source if available. Label inferred packaging fit separately from confirmed procurement; '
+              'unknown budget/timing is acceptable, never invent purchase intent. Exclude packaging manufacturers/suppliers, digital gift cards, virtual products, news, jobs, '
+              'and brands with only order/complaint inboxes. Independent or small-to-mid DTC brands preferred. Exclude %s. The domain must be the brand\'s own official site '
               '(no marketplaces, social profiles or link-in-bio pages). %s'
               ) % (b['company'], b['pitch'], profile.get('exclude', 'marketplaces, giant corporations, resellers'),
                    'Use web search to confirm each site is live.' if searching else 'Only list brands you are confident exist, with their real domain.')
@@ -77,6 +81,10 @@ def research(account, url, email_hint='', manual=False):
         if not manual:
             raise
         p = research_with_ai(account, url, email_hint)  # manual lead on a site the crawler cannot read
+    if not p.get('email_verified'):
+        raise web.CrawlError('缺少已核实的公开商务邮箱来源')
+    if web.SKIP_PRODUCT.search(p.get('product_name', '') + ' ' + p.get('product_url', '')):
+        raise web.CrawlError('非目标实体产品')
     if web.root_domain(p['domain']) in own_domains():
         raise web.CrawlError('自家域名')
     if store.hard_blocked(p['email'], account['id']):
@@ -86,7 +94,7 @@ def research(account, url, email_hint='', manual=False):
     img, img_url = web.product_image(p.get('product_image_url'), p.get('product_url') or None)
     if img_url:
         p['product_image_url'] = img_url
-    if not manual and not (p.get('product_name') and img):
+    if not (p.get('product_name') and p.get('product_url') and img):
         raise web.CrawlError('官网没找到可展示的产品')  # concepts need a real product photo; skipping costs no tokens
     return p, img
 
@@ -103,8 +111,24 @@ def research_with_ai(account, url, email_hint):
     if not web.EMAIL_RE.fullmatch(email or '-'):
         raise web.CrawlError('没找到公开邮箱，请手动填写')
     site = d.get('website') or url
+    if web.root_domain(web.host(site)) != web.root_domain(web.host(url)):
+        raise web.CrawlError('搜索结果品牌与输入网站不一致')
+    source = web.verify_email(email, d.get('email_source') or '', site, d.get('company', ''))
+    product_url = d.get('product_url') or ''
+    requested_path = web.urlsplit(url if '://' in url else 'https://' + url).path.rstrip('/')
+    if requested_path and web.urlsplit(product_url).path.rstrip('/') != requested_path:
+        raise web.CrawlError('AI 不得替换用户指定产品')
+    if web.root_domain(web.host(product_url)) != web.root_domain(web.host(site)) or web.NON_PRODUCT_PATH.search(product_url):
+        raise web.CrawlError('没有同品牌官网具体产品来源')
+    product_doc, final = web.page(product_url)
+    product = web.jsonld_product(product_doc, final)
+    if not web.valid_product(product, site):
+        raise web.CrawlError('AI 搜索产品未通过官网实体产品核验')
+    d.update(product_name=product['name'], product_url=product['url'], product_image_url=product['image_url'], product_facts=product['facts'])
     return {'company': d.get('company') or web.host(site), 'customer_brand': d.get('company') or web.host(site),
-            'website': web.normalize(site), 'domain': web.host(site), 'email': email, 'email_source': d.get('email_source', 'ai'),
+            'website': web.normalize(site), 'domain': web.host(site), 'email': email, 'email_source': source, 'email_verified': True,
+            'match_reason': '官网实体产品适配包装方案，采购需求尚未确认', 'purchase_signal': 'fit_inference',
+            'product_source': product['url'], 'purchase_signal_source': '',
             'country': d.get('country', ''), 'lang': '', 'site_description': '', 'product_name': d.get('product_name', ''),
             'product_url': d.get('product_url', ''), 'product_image_url': d.get('product_image_url', ''),
             'product_facts': [str(f) for f in (d.get('product_facts') or [])][:4], 'product_price': '', 'product_description': ''}
@@ -112,7 +136,7 @@ def research_with_ai(account, url, email_hint):
 
 def facts_for_prompt(p):
     keep = {k: p.get(k) for k in ('customer_brand', 'country', 'site_description', 'product_name', 'product_price',
-                                   'product_facts', 'product_description') if p.get(k)}
+                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal') if p.get(k)}
     return json.dumps(keep, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -125,6 +149,8 @@ EMAIL_RULES = '''EMAIL RULES - a cold first email from {contact} at {company}; i
 - "A - <short concept name>: <one sentence: what it is + practical benefit for THIS product>"
 - "B - <short concept name>: <one sentence, clearly different structure and benefit>"
 - One short line on what we do.
+- Packaging fit is a proposal, not proof they are buying. Never invent a launch, procurement need, budget, timing or performance claim.
+- Say concepts need sample/fit/transit validation; offer to forward to their packaging colleague when writing a general brand inbox.
 - Close with ONE easy question inviting a one-word reply, e.g. {cta} Vary the wording.
 - No sign-off or signature (the app adds it). No links. 80-120 words. Plain, warm, confident {language}. Short paragraphs.
 - Banned: "I hope this email finds you well", "I came across", "elevate", "game-changer", "synergy", "reach out", "cutting-edge", "world-class", invented statistics, guarantees, certifications, prices, lead times, factory claims, other supplier names.

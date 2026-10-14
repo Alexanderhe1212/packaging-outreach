@@ -146,10 +146,20 @@ class FlowTest(unittest.TestCase):
                                   {'id': 'GUKA', 'name': 'GUKA', 'company_name': 'GUKA Packaging', 'sender': 'sales@second-brand.com',
                                    'smtp': {'host': 'smtp.test', 'port': 465}, 'imap': {'host': 'imap.test', 'port': 993}}]})
         config.save_secrets(keys={'main': 'sk-test'}, passwords={'MTT': 'pw'})
+        cls.originals=(web.crawl,mailer.smtplib.SMTP_SSL,mailer.sync_inbox)
         real_crawl = web.crawl
         web.crawl = lambda url, hint='': real_crawl(cls.shop, hint)  # every candidate domain resolves to the fake shop
         mailer.smtplib.SMTP_SSL = FakeSMTP
         mailer.sync_inbox = lambda acc: {'checked': 0}
+
+    @classmethod
+    def tearDownClass(cls):
+        web.crawl,mailer.smtplib.SMTP_SSL,mailer.sync_inbox=cls.originals
+        for w in server.WORKERS.values():
+            w.stopped=True;w.wake.set()
+            w.join(2)
+        server.WORKERS.clear()
+        store.close()
 
     def test_full_flow(self):
         w = AccountWorker('MTT')

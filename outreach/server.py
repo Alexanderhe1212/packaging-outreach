@@ -5,6 +5,8 @@ import os
 import sys
 import threading
 import time
+import uuid
+from functools import wraps
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -111,40 +113,56 @@ def api_add(data):
         if store.blocked(email, dom, aid) and not data.get('force'):
             skipped.append(dom)
             continue
-        ids.append(store.add_lead(aid, 'queued', 'manual', company=dom, domain=dom, email=email,
-                                  data={'manual': {'url': u if '//' in u else 'https://' + u, 'email': email}}))
+        lid=store.claim_prospect(aid,dict(company=dom,domain=dom,email=email),source='manual',
+                                 manual={'url':u if '//' in u else 'https://'+u,'email':email})
+        if lid: ids.append(lid)
+        else: skipped.append(dom)
     worker(aid).wake.set()
     return {'ids': ids, 'skipped': skipped}
 
 
 def api_send(data):
     lead = store.lead(int(data['id']))
-    if lead['status'] not in ('ready', 'failed'):
-        raise ValueError('这封邮件当前状态不能发送')
-    if lead['status'] == 'failed':
-        if not (lead['subject'] and lead['body']):
-            raise ValueError('邮件还没写好')
-        store.update(lead['id'], status='ready')
-    result = worker(lead['account']).send(lead, manual=True)
+    result = worker(lead['account']).send(lead, manual=True, origin=data.get('_origin',{'source':'api_internal'}))
+    messages={'changed':'草稿已更新，请重新审核','interval':'发送间隔尚未到，请稍后审核发送','paused':'账号已暂停','daily_limit':'今日发送额度已满',
+              'total_limit':'今日总发送额度已满','not_ready':'当前状态不可发送','duplicate':'重复公司或邮箱，已阻止',
+              'suppressed':'已退订、退信或回复，已阻止','claimed':'另一条记录已认领此客户','sending':'该账号有发送事务进行中',
+              'outside_hours':'当前不在发送时段','already_contacted':'已联系，禁止重复发送','account_mismatch':'账号不匹配'}
+    if result not in ('sent','unknown','bounced','retry','blocked'):
+        raise ValueError(messages.get(result,result))
     return {'result': result, 'lead': api_lead(lead['id'])}
 
 
+def record_mutation(fn):
+    @wraps(fn)
+    def wrapped(data):
+        with store._lock:
+            return fn(data)
+    return wrapped
+
+
+@record_mutation
 def api_skip(data):
-    store.update(int(data['id']), status='skipped')
+    lid=int(data['id'])
+    if store.lead(lid)['status'] in ('sending','sent','unknown','replied','bounced','unsubscribed','writing','researching','imaging'):
+        raise ValueError('已发送或待核实记录不可跳过')
+    store.update(lid, status='skipped')
     return {'ok': True}
 
 
+@record_mutation
 def api_edit(data):
     lead = store.lead(int(data['id']))
-    if lead['status'] in ('sent', 'unknown', 'replied'):
+    if lead['status'] in ('sent', 'sending', 'unknown', 'replied', 'bounced', 'unsubscribed'):
         raise ValueError('已发送的邮件不能修改')
     store.update(lead['id'], subject=data.get('subject', lead['subject']).strip(), body=data.get('body', lead['body']).strip())
     return api_lead(lead['id'])
 
 
+@record_mutation
 def api_redo(data):
     lead = store.lead(int(data['id']))
-    if lead['status'] in ('sent', 'unknown', 'replied', 'imaging', 'writing', 'researching'):
+    if lead['status'] in ('sent', 'sending', 'unknown', 'bounced', 'unsubscribed', 'replied', 'imaging', 'writing', 'researching'):
         raise ValueError('当前状态不能重做')
     d = lead['data']
     d.pop('image_prompt', None)
@@ -252,7 +270,7 @@ def api_quit(_data):
     return {'ok': True}
 
 
-GET = {'/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
+GET = {'/api/audit': lambda qs: {'items': store.q('SELECT * FROM audit ORDER BY id DESC LIMIT 100')}, '/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
        '/api/usage': lambda qs: store.usage_summary(int(qs.get('days', ['7'])[0])),
        '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION}}
 POST = {'/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
@@ -333,6 +351,9 @@ class Handler(BaseHTTPRequestHandler):
             fn = POST.get(urlsplit(self.path).path)
             if not fn:
                 return self.reply({'error': 'not found'}, 404)
+            label=self.headers.get('X-Outreach-Source','api')
+            if label not in ('ui','cli','review-agent'): label='api'
+            data['_origin']={'source':label,'request_id':uuid.uuid4().hex,'peer':self.client_address[0]}
             self.reply(fn(data))
         except Exception as e:
             self.reply({'error': str(e)}, 400)

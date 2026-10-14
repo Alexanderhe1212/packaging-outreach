@@ -1,5 +1,5 @@
 #!/bin/bash
-# 在桌面（或 /Applications）生成「OutreachPilot.app」：双击即启动后台服务并打开应用窗口。
+# 在桌面（或 /Applications）生成「Outsearch Pilot.app」：双击即启动后台服务并打开应用窗口。
 # 用法：bash scripts/install_mac_app.sh            → 桌面
 #       bash scripts/install_mac_app.sh /Applications
 # 程序文件复制到 ~/Library/Application Support/OutreachPilot/app 运行：macOS 不允许从图标启动的进程读取桌面/文稿文件夹。
@@ -7,46 +7,23 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:-$HOME/Desktop}"
-APP="$DEST/OutreachPilot.app"
-PY="$(command -v python3 || echo /usr/bin/python3)"
+APP="$DEST/Outsearch Pilot.app"
+PY="${OUTREACH_PYTHON:-$HOME/.local/share/outreachpilot-python/bin/python3}"
+if [ ! -x "$PY" ]; then echo "设置 OUTREACH_PYTHON 为已安装的 Python 3 路径" >&2; exit 1; fi
 LOGDIR="$HOME/Library/Application Support/OutreachPilot"
 ROOT="$LOGDIR/app"
 
 mkdir -p "$ROOT"
 rsync -a --delete --exclude '.git' --exclude '__pycache__' --exclude '.DS_Store' "$SRC/" "$ROOT/"
 
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$LOGDIR"
-
-cat > "$APP/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleName</key><string>OutreachPilot</string>
-  <key>CFBundleDisplayName</key><string>OutreachPilot</string>
-  <key>CFBundleIdentifier</key><string>com.outreachpilot.app</string>
-  <key>CFBundleExecutable</key><string>OutreachPilot</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>LSUIElement</key><false/>
-</dict></plist>
-PLIST
-
-cat > "$APP/Contents/MacOS/OutreachPilot" <<LAUNCH
-#!/bin/bash
-# Starts the background service once (it keeps running after the window closes), then opens the app window.
-ROOT="$ROOT"
-PY="$PY"
-LOG="$LOGDIR/app.log"
-PORT=\$("\$PY" -c "import json,os;p=os.path.expanduser('~/Library/Application Support/OutreachPilot/settings.json');print(json.load(open(p)).get('port',18800) if os.path.exists(p) else 18800)" 2>/dev/null || echo 18800)
-if ! curl -s -m 1 "http://127.0.0.1:\$PORT/api/ping" >/dev/null 2>&1; then
-  cd "\$ROOT" && nohup "\$PY" app.py --no-browser >> "\$LOG" 2>&1 &
-  for i in \$(seq 1 50); do curl -s -m 1 "http://127.0.0.1:\$PORT/api/ping" >/dev/null 2>&1 && break; sleep 0.2; done
+# Preserve the previous desktop entry for rollback; never replace it silently.
+if [ -e "$APP" ]; then
+  BACKUP="$HOME/Library/Application Support/OutreachPilot Backups/launchers/$(date +%Y%m%d-%H%M%S)-$$"
+  mkdir -p "$BACKUP"
+  chmod 700 "$BACKUP"
+  mv "$APP" "$BACKUP/Outsearch Pilot.app"
 fi
-cd "\$ROOT" && exec "\$PY" app.py
-LAUNCH
-chmod +x "$APP/Contents/MacOS/OutreachPilot"
+"$PY" "$SRC/scripts/build_mac_launcher.py" "$APP" --python "$PY" --root "$ROOT" --logdir "$LOGDIR"
 
 # icon
 TMP="$(mktemp -d)"
@@ -58,6 +35,8 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$TMP/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null || cp "$TMP/icon.png" "$APP/Contents/Resources/AppIcon.png"
 rm -rf "$TMP"
+/usr/bin/codesign --force --sign - "$APP"
+/usr/bin/codesign --verify "$APP"
 touch "$APP"
 echo "已生成：$APP"
 
@@ -69,7 +48,7 @@ cat > "$BIN/outreach" <<SHIM
 exec "$PY" "$ROOT/app.py" "\$@"
 SHIM
 chmod +x "$BIN/outreach"
-echo "已安装命令：$BIN/outreach   （试试：outreach go）"
+echo "已安装命令：$BIN/outreach   （查看状态：outreach status；打开界面：outreach open）"
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "提示：把 $BIN 加入 PATH，例如 echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.zshrc";; esac
 
 # Skill for Codex and Claude Code
