@@ -65,17 +65,38 @@ def open_window():
 @contextlib.contextmanager
 def process_lock(name, blocking=True):
     """OS-owned advisory lock; released on crash, never inferred from stale PID files."""
-    import fcntl
-    with open(config.data_dir() / name, 'a') as lock:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        except BlockingIOError:
-            yield False
-            return
-        try:
-            yield True
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with open(config.data_dir() / name, 'a+b') as lock:
+        if sys.platform == 'win32':
+            import msvcrt
+            import time
+            if lock.seek(0, 2) == 0:
+                lock.write(b'\0'); lock.flush()
+            while True:
+                lock.seek(0)
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if not blocking:
+                        yield False
+                        return
+                    time.sleep(.05)
+            try:
+                yield True
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def ensure_running():

@@ -175,9 +175,12 @@ def add_candidates(account, items):
             if not d or '.' not in d or blocked(domain=d, account=account):
                 continue
             c = db()
-            cur = c.execute('INSERT OR IGNORE INTO candidates(domain,account,brand,note,created_at) VALUES(?,?,?,?,?)',
-                            (d, account, str(item.get('brand', ''))[:120], json.dumps({k:str(item.get(k,''))[:1500] for k in ('brand','domain','product_url','match_reason','signal_type','signal_source','note')}, ensure_ascii=False), time.time()))
-            added += cur.rowcount
+            fields = ('brand','domain','product_url','match_reason','signal_type','signal_source','note','opportunity_tier','project_name','evidence_quote','published_at','checked_at','procurement_status','missing_information','buyer_role','requested_product','quantity','specifications','arrival_requirement','open_window_evidence','capability_status','source_url','verification','policy_hash')
+            tier = item.get('opportunity_tier')
+            state = 'backlog' if tier in ('B','C') or item.get('capability_status') == 'needs_confirmation' else 'new'
+            cur = c.execute('INSERT OR IGNORE INTO candidates(domain,account,brand,note,created_at,status) VALUES(?,?,?,?,?,?)',
+                            (d, account, str(item.get('brand', ''))[:120], json.dumps({k:str(item.get(k,''))[:1500] for k in fields}, ensure_ascii=False), time.time(), state))
+            added += cur.rowcount if state == 'new' else 0
             c.commit()
     return added
 

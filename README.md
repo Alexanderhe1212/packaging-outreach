@@ -105,3 +105,9 @@ The desktop applet starts a background service and opens the browser without Ter
 Search now requires an official public business/general contact, a named physical product and a product image. Fit inferences are distinguished from confirmed purchase intent. Generated concepts still require individual human/agent review before sending; budget or buying dates are not invented.
 
 See [macOS installation and recovery](docs/mac-install-recovery.md) for a clean install, private local backups, and safe recovery.
+
+### Current procurement profile
+
+The optional `packaging-current-projects` profile searches company + named project with current buyer evidence. Buyer-site quotes are checked before grading: A+ requires recent dated evidence, an open supplier/quote window and two stated requirements; A confirms demand but asks whether the window remains open. B/C and unverified agency/third-party authority remain in a backlog, excluded from preparation and sending. External opportunities need manual buyer/authority verification. Existing drafts without qualified evidence cannot be sent under this profile. No supplier ads, expired RFQs or product-launch-as-procurement claims. First contact is a short window/project question; concept images are disabled until a real project merits them. No-result searches back off to reduce token usage.
+
+Local account identities and contact details stay in private settings. The public profile is a reusable strategy template, not a customer list.

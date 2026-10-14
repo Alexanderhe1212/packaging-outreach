@@ -28,6 +28,15 @@ class SafetyTests(unittest.TestCase):
   if before_data and not before_data():return 'blocked','changed'
   self.calls.append((a['id'],str(m['To'])));return 'sent',''
  def mocks(self):return patch.multiple(mailer,build=self.build,send=self.transport,save_eml=lambda *a,**k:None)
+ def test_current_policy_blocks_unqualified_old_draft(self):
+  lead=self.lead()
+  with patch.object(config,'profile',return_value={'discovery_rules':'current projects'}),self.mocks():
+   self.assertEqual(self.ws['MTT'].send(lead,manual=True),'procurement_evidence_required')
+  self.assertEqual(self.calls,[])
+ def test_backlog_not_claimed_for_preparation(self):
+  self.assertEqual(store.add_candidates('MTT',[{'domain':'newbrand.test','opportunity_tier':'B','project_name':'Launch'}]),0)
+  self.assertIsNone(store.claim_candidate('MTT'))
+  self.assertEqual(store.q("select status from candidates where domain='newbrand.test'",one=True)['status'],'backlog')
  def test_atomic_company_claim(self):
   bar=threading.Barrier(2);out=[]
   def run(a):bar.wait();out.append(store.claim_prospect(a,dict(company='BRAND & Co',domain='www.brand.test',email=' Hello@Brand.test ')))

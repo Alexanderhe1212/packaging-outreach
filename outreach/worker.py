@@ -180,7 +180,7 @@ class AccountWorker(threading.Thread):
                 if not added:
                     self.miss += 1
                     self.activity = '这一批都是重复或无效客户，换个方向再找'
-                    self.idle = min(10 * self.miss, 120)  # wait outside the turn
+                    self.idle = max(600, min(300 * self.miss, 1800)) if prof.get('discovery_rules') else min(10 * self.miss, 120)  # wait outside the turn
                 else:
                     self.miss = 0
                 return
@@ -190,6 +190,9 @@ class AccountWorker(threading.Thread):
                     detail=__import__('json').loads(cand.get('note') or '{}')
                 except (ValueError,TypeError):
                     detail={}
+                if prof.get('discovery_rules') and detail.get('opportunity_tier') not in ('A+','A'):
+                    store.mark_candidate(cand['domain'], 'backlog', '新策略：需求证据待核实，不进入写信队列')
+                    return
                 target=detail.get('product_url') or cand['domain']
                 if web.root_domain(web.host(target))!=web.root_domain(cand['domain']):
                     raise web.CrawlError('候选商品来源跨品牌')
@@ -205,7 +208,7 @@ class AccountWorker(threading.Thread):
             store.mark_candidate(cand['domain'], 'used')
             prospect['focus'] = detail.get('match_reason') or detail.get('note') or cand.get('note','')
             prospect['discovery_evidence'] = detail
-            prospect['purchase_signal'] = 'fit_inference'
+            prospect['purchase_signal'] = 'confirmed_procurement' if detail.get('opportunity_tier') in ('A+','A') else 'fit_inference'
             lid = store.claim_prospect(self.id, prospect)
             if not lid:
                 self.activity = '跳过重复或已抑制客户：' + prospect['domain']
@@ -231,6 +234,9 @@ class AccountWorker(threading.Thread):
                     return
                 store.update(lid, company=p['company'], domain=p['domain'], email=p['email'], data=d)
             p = d['prospect']
+            if prof.get('discovery_rules') and (p.get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
+                store.update(lid, status='backlog', error='当前项目采购证据待核实；保留后备')
+                return
             name = p.get('customer_brand') or p['company']
             if photo is None and p.get('product_image_url'):
                 photo, _ = web.product_image(p['product_image_url'])
@@ -275,6 +281,9 @@ class AccountWorker(threading.Thread):
             lead=store.lead(lead['id']);acc=self.acc
             if not lead or lead['account']!=self.id:
                 return 'account_mismatch'
+            if self.profile.get('discovery_rules') and (lead['data'].get('prospect',{}).get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
+                store.audit('send_denied',self.id,lead['id'],origin,'procurement_evidence_required')
+                return 'procurement_evidence_required'
             img=Path(lead['image']).read_bytes() if lead.get('image') and Path(lead['image']).exists() else None
             msg=mailer.build_followup(acc,lead,self.profile) if followup else mailer.build(acc,lead,img)
             origin=origin or {'source':'manual_internal' if manual else ('followup' if followup else 'scheduler')}

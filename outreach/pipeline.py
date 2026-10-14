@@ -11,6 +11,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import hashlib
 from pathlib import Path
 
 from . import config, llm, store, web
@@ -58,10 +60,18 @@ def discover(account, profile):
               '(no marketplaces, social profiles or link-in-bio pages). %s'
               ) % (b['company'], b['pitch'], profile.get('exclude', 'marketplaces, giant corporations, resellers'),
                    'Use web search to confirm each site is live.' if searching else 'Only list brands you are confident exist, with their real domain.')
+    policy = profile.get('discovery_rules', '')
+    if policy:
+        if not searching:
+            raise web.CrawlError('当前采购策略必须使用联网搜索；不可凭模型记忆生成需求')
+        system += '\nCURRENT PROCUREMENT POLICY (overrides generic prospect preferences):\n' + policy
+        system += '\nEach candidate MUST also have opportunity_tier (A+, A, B or C), project_name, evidence_quote (verbatim), published_at (ISO date or unknown), checked_at, procurement_status, missing_information, buyer_role, requested_product, quantity, specifications, arrival_requirement, open_window_evidence, capability_status and source_url. Unknown facts stay unknown. Return an empty list if no supportable candidates; never promote fit to demand.'
+    policy_hash = hashlib.sha256(policy.encode()).hexdigest()[:16]
+    store.put('discovery_last_' + account['id'], {'started_at':time.time(), 'profile':profile.get('id'), 'policy_hash':policy_hash, 'search':searching, 'status':'searching'})
     skip = store.recent_candidate_domains(account['id'], 40)
     user = ('Find %d prospects. Focus: %s. Market: %s. Prefer less obvious brands (names starting %s), not the first famous results.\n'
-            'Skip these domains: %s') % (n, focus, market, letters, ', '.join(skip) or '(none)')
-    data = stage.json(system, user, search=searching, max_tokens=1500)
+            'Skip these domains: %s. Current UTC date: '+time.strftime('%Y-%m-%d',time.gmtime())) % (n, focus, market, letters, ', '.join(skip) or '(none)')
+    data = stage.json(system, user, search=searching, max_tokens=2800 if policy else 1500)
     items = data.get('candidates', data) if isinstance(data, dict) else data
     items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
     for i in items:
@@ -69,7 +79,14 @@ def discover(account, profile):
         i['note'] = '%s | %s' % (focus[:60], i.get('note', ''))
     own = own_domains()
     items = [i for i in items if i['domain'] and web.root_domain(i['domain']) not in own]
-    return store.add_candidates(account['id'], items)
+    if policy:
+        from .opportunity import verify
+        for i in items:
+            verify(i)
+            i['policy_hash'] = policy_hash
+    added = store.add_candidates(account['id'], items)
+    store.put('discovery_last_' + account['id'], {'started_at':time.time(), 'finished_at':time.time(), 'profile':profile.get('id'), 'policy_hash':policy_hash, 'search':searching, 'status':'completed', 'found':len(items), 'queued':added, 'tiers':[i.get('opportunity_tier','ungraded') for i in items]})
+    return added
 
 
 # ---------------- 2. crawl ----------------
@@ -136,7 +153,7 @@ def research_with_ai(account, url, email_hint):
 
 def facts_for_prompt(p):
     keep = {k: p.get(k) for k in ('customer_brand', 'country', 'site_description', 'product_name', 'product_price',
-                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal') if p.get(k)}
+                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal', 'discovery_evidence') if p.get(k)}
     return json.dumps(keep, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -203,6 +220,9 @@ def writer_prompts(account, profile, p, has_photo):
     user = ('The attached photo is their real product. ' if has_photo else 'No photo available; rely on the facts. ') + \
         'Design two %s concepts for it and write the email.\nPRODUCT RESEARCH (from their website): %s' % (noun, facts_for_prompt(p)) + \
         variety_note(account, profile)
+    if profile.get('discovery_rules'):
+        system += '\nFIRST CONTACT OVERRIDE: establish that the sourcing project and supplier window are current before engineering or quotation. Write a natural 45-80 word English email with one verified project fact, one relevant identity sentence and exactly ONE short question. For tier A ask only whether suppliers/quotes are still being considered. Do not claim an A/B image is attached or already created. No specs checklist, pricing, MOQ or delivery promises. The a/b JSON fields may be empty; no image is needed at this stage.'
+        user = 'Write a short project/window confirmation using only these verified facts: ' + facts_for_prompt(p)
     return system, user
 
 
