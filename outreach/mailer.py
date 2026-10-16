@@ -181,12 +181,14 @@ def preview_html(acc, lead, image_bytes):
 
 
 # ---------------- send ----------------
-def send(acc, msg):
+def send(acc, msg, before_data=None):
     """Returns (result, note); result is 'sent' | 'bounced' | 'unknown' | 'retry'. Never resends once DATA has started."""
     rcpt = parseaddr(str(msg['To']))[1]
     stage, client = 'connect', None
     try:
         client = smtp_connect(acc)
+        if before_data is not None and not before_data():
+            return 'blocked', '发送前保护已变更'
         stage = 'mail'
         client.mail(acc['sender'])
         code, resp = client.rcpt(rcpt)
@@ -194,6 +196,8 @@ def send(acc, msg):
             return 'bounced', 'RCPT %s %s' % (code, resp[:120])
         if code >= 400:
             return 'retry', 'RCPT %s' % code
+        if before_data is not None and not before_data():
+            return 'blocked', 'DATA 前保护已变更'
         stage = 'data'
         code, resp = client.data(msg.as_bytes())
         if code == 250:
@@ -282,7 +286,7 @@ def sync_inbox(acc):
     """Mark replies / opt-outs / bounces for this account's sent leads. Read-only (BODY.PEEK, readonly select)."""
     aid = acc['id']
     sent = {r['email']: r['id'] for r in store.q(
-        "SELECT id,email FROM leads WHERE account=? AND status IN ('sent','unknown','replied')", (aid,))}
+        "SELECT id,email FROM leads WHERE account=? AND status IN ('sent','sending','unknown','replied')", (aid,))}
     if not sent:
         return {'checked': 0}
     c = imap_connect(acc)

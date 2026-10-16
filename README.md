@@ -31,10 +31,10 @@ outreach stop      # 收工
 ## 安装
 
 ```bash
-git clone https://github.com/Alexanderhe1212/packaging-outreach ~/OutreachPilot
-cd ~/OutreachPilot
+git clone https://github.com/Alexanderhe1212/packaging-outreach "$HOME/Outsearch Pilot"
+cd "$HOME/Outsearch Pilot"
 python3 app.py                       # 启动并打开窗口
-bash scripts/install_mac_app.sh      # macOS：桌面 OutreachPilot.app + 全局 outreach 命令 + Codex/Claude Skill
+bash scripts/install_mac_app.sh      # macOS：桌面 Outsearch Pilot.app + 全局 outreach 命令 + Codex/Claude Skill
 ```
 Windows 双击 `start.bat`；Linux 运行 `./start.sh`。
 
@@ -67,7 +67,7 @@ Windows 双击 `start.bat`；Linux 运行 `./start.sh`。
 
 - 每个账号每日上限、两封之间随机间隔、北京时间发送时段
 - 只用客户官网上公开的邮箱；免费邮箱必须包含品牌名才会使用
-- 账号之间资料完全分开、轮流工作；可选「跨账号防撞」让同一家公司只被一个账号联系
+- 账号品牌资料完全分开、独立工作；共享滚动 7×24 小时联系冷却，同一公司跨账号仍受保护
 - 回复、退订、退信、结果未知的地址不再发送；盒型会避开该账号最近用过的结构
 - SMTP 发出后结果未知不会自动重发；SMTP 250 只代表服务器接受
 - API Key 失效、额度用完、邮箱密码错误时该账号自动暂停并显示原因
@@ -95,3 +95,29 @@ python3 -m unittest discover -s tests -v   # 离线端到端测试：假 AI 接�
 结构：`outreach/llm.py` 统一 AI 接口 · `web.py` 官网抓取 · `pipeline.py` 找客户/写信/生图 · `worker.py` 每账号一个线程 · `mailer.py` SMTP/IMAP · `store.py` SQLite · `server.py` 本机 API · `ui/index.html` 界面。
 
 MIT License
+
+### Repair 1.3.1 (2026-10-14)
+
+Accounts now prepare independently. Candidate and company/email/domain claims are atomic. Every send path, including the UI button and follow-ups, uses the same paused-state, interval, quota, suppression and duplicate gate. A durable `sending` reservation precedes SMTP; interrupted reservations become `unknown` and are never automatically retried. Inbox suppression is shared across accounts. HTTP callers can identify `X-Outreach-Source: ui|cli|review-agent`; `/api/audit` exposes the latest bounded operational events (no message bodies or credentials). A source label is diagnostic metadata, not authenticated human identity.
+
+The desktop applet starts a background service and opens the browser without Terminal. Startup and service locks prevent duplicate processes. `launcher.log` and `app.log` are in the application data directory. The installer preserves a previous app in the local backup folder outside the Desktop. Opening the app does not start paused accounts or enable automatic sending.
+
+Search now requires an official public business/general contact, a named physical product and a product image. Fit inferences are distinguished from confirmed purchase intent. Generated concepts still require individual human/agent review before sending; budget or buying dates are not invented.
+
+See [macOS installation and recovery](docs/mac-install-recovery.md) for a clean install, private local backups, and safe recovery.
+
+### Current procurement profile
+
+The optional `packaging-current-projects` profile searches company + named project with current buyer evidence. Buyer-site quotes are checked before grading: A+ requires recent dated evidence, an open supplier/quote window and two stated requirements; A confirms demand but asks whether the window remains open. B/C and unverified agency/third-party authority remain in a backlog, excluded from preparation and sending. External opportunities need manual buyer/authority verification. Existing drafts without qualified evidence cannot be sent under this profile. No supplier ads, expired RFQs or product-launch-as-procurement claims. First contact is a short window/project question; concept images are disabled until a real project merits them. No-result searches back off to reduce token usage.
+
+Local account identities and contact details stay in private settings. The public profile is a reusable strategy template, not a customer list.
+
+### Rolling seven-day contact window (1.3.2)
+
+Set account and total `daily_limit`/`daily_limit_total` to **0** for no application daily cap; this is not a large substitute number and does not change provider limits. Existing sending intervals and review mode remain in effect.
+
+All account identities share a rolling 604800-second window since the latest accepted send, including follow-ups. At exactly seven days ordinary contact history becomes eligible again. Atomic reservations and normalized email/domain/company claims still prevent simultaneous duplicates. Queue preparation, immediate/API sends, retries and optional follow-ups use the same gate; SMTP transport rechecks suppression and pause state. Sent records are never cleared or overwritten to make a customer eligible.
+
+Eligible historical prospects get a new queued record using verified product facts and prior-message context. Current procurement evidence is rechecked without repeating the entire product crawl. Old message text cannot be reused unchanged. A failed evidence review is not repeatedly retried each worker cycle. Positive replies remain held for conversation review; unsubscribes, explicit refusals, hard bounces, unresolved unknown outcomes, customer pauses and future-contact commitments remain excluded. History without a reliable send timestamp requires review. The window alone never establishes current buying intent.
+
+Account start/pause API actions now record time and diagnostic request source. Source labels are not authenticated proof of a human actor.

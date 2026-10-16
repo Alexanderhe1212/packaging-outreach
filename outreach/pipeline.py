@@ -11,6 +11,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import hashlib
 from pathlib import Path
 
 from . import config, llm, store, web
@@ -48,16 +50,28 @@ def discover(account, profile):
     letters = random.choice(['A-E', 'F-K', 'L-P', 'Q-T', 'U-Z', 'any letter'])
     searching = stage.can_search
     system = ('You find B2B prospects for %s. What we sell: %s\n'
-              'Return ONLY JSON: {"candidates":[{"brand":"Brand name","domain":"brand.com","note":"what they sell, 5-10 words"}]}\n'
+              'Return ONLY JSON: {"candidates":[{"brand":"Brand name","domain":"brand.com","product_url":"official named physical product URL","match_reason":"packaging fit","signal_type":"fit_inference or confirmed_procurement","signal_source":"official URL or empty","note":"brief product and dated evidence"}]}\n'
               'Rules: real, currently operating brands that sell physical products and have their own website/online store; '
-              'independent or small-to-mid DTC brands preferred. Exclude %s. The domain must be the brand\'s own official site '
+              'Prioritize perfume, skincare, jewelry, apparel/scarves, chocolate and physical gifting brands for rigid boxes, paper bags and mailer boxes. '
+              'Find a specific current physical product or project on the official website. Prefer recent launches, gift sets, packaging changes or explicit procurement notices; '
+              'in note record product URL, fit reason and dated signal source if available. Label inferred packaging fit separately from confirmed procurement; '
+              'unknown budget/timing is acceptable, never invent purchase intent. Exclude packaging manufacturers/suppliers, digital gift cards, virtual products, news, jobs, '
+              'and brands with only order/complaint inboxes. Independent or small-to-mid DTC brands preferred. Exclude %s. The domain must be the brand\'s own official site '
               '(no marketplaces, social profiles or link-in-bio pages). %s'
               ) % (b['company'], b['pitch'], profile.get('exclude', 'marketplaces, giant corporations, resellers'),
                    'Use web search to confirm each site is live.' if searching else 'Only list brands you are confident exist, with their real domain.')
+    policy = profile.get('discovery_rules', '')
+    if policy:
+        if not searching:
+            raise web.CrawlError('当前采购策略必须使用联网搜索；不可凭模型记忆生成需求')
+        system += '\nCURRENT PROCUREMENT POLICY (overrides generic prospect preferences):\n' + policy
+        system += '\nEach candidate MUST also have opportunity_tier (A+, A, B or C), project_name, evidence_quote (verbatim), published_at (ISO date or unknown), checked_at, procurement_status, missing_information, buyer_role, requested_product, quantity, specifications, arrival_requirement, open_window_evidence, capability_status and source_url. Unknown facts stay unknown. Return an empty list if no supportable candidates; never promote fit to demand.'
+    policy_hash = hashlib.sha256(policy.encode()).hexdigest()[:16]
+    store.put('discovery_last_' + account['id'], {'started_at':time.time(), 'profile':profile.get('id'), 'policy_hash':policy_hash, 'search':searching, 'status':'searching'})
     skip = store.recent_candidate_domains(account['id'], 40)
     user = ('Find %d prospects. Focus: %s. Market: %s. Prefer less obvious brands (names starting %s), not the first famous results.\n'
-            'Skip these domains: %s') % (n, focus, market, letters, ', '.join(skip) or '(none)')
-    data = stage.json(system, user, search=searching, max_tokens=1500)
+            'Skip these domains: %s. Current UTC date: '+time.strftime('%Y-%m-%d',time.gmtime())) % (n, focus, market, letters, ', '.join(skip) or '(none)')
+    data = stage.json(system, user, search=searching, max_tokens=2800 if policy else 1500)
     items = data.get('candidates', data) if isinstance(data, dict) else data
     items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
     for i in items:
@@ -65,7 +79,14 @@ def discover(account, profile):
         i['note'] = '%s | %s' % (focus[:60], i.get('note', ''))
     own = own_domains()
     items = [i for i in items if i['domain'] and web.root_domain(i['domain']) not in own]
-    return store.add_candidates(account['id'], items)
+    if policy:
+        from .opportunity import verify
+        for i in items:
+            verify(i)
+            i['policy_hash'] = policy_hash
+    added = store.add_candidates(account['id'], items)
+    store.put('discovery_last_' + account['id'], {'started_at':time.time(), 'finished_at':time.time(), 'profile':profile.get('id'), 'policy_hash':policy_hash, 'search':searching, 'status':'completed', 'found':len(items), 'queued':added, 'tiers':[i.get('opportunity_tier','ungraded') for i in items]})
+    return added
 
 
 # ---------------- 2. crawl ----------------
@@ -77,6 +98,10 @@ def research(account, url, email_hint='', manual=False):
         if not manual:
             raise
         p = research_with_ai(account, url, email_hint)  # manual lead on a site the crawler cannot read
+    if not p.get('email_verified'):
+        raise web.CrawlError('缺少已核实的公开商务邮箱来源')
+    if web.SKIP_PRODUCT.search(p.get('product_name', '') + ' ' + p.get('product_url', '')):
+        raise web.CrawlError('非目标实体产品')
     if web.root_domain(p['domain']) in own_domains():
         raise web.CrawlError('自家域名')
     if store.hard_blocked(p['email'], account['id']):
@@ -86,7 +111,7 @@ def research(account, url, email_hint='', manual=False):
     img, img_url = web.product_image(p.get('product_image_url'), p.get('product_url') or None)
     if img_url:
         p['product_image_url'] = img_url
-    if not manual and not (p.get('product_name') and img):
+    if not (p.get('product_name') and p.get('product_url') and img):
         raise web.CrawlError('官网没找到可展示的产品')  # concepts need a real product photo; skipping costs no tokens
     return p, img
 
@@ -103,8 +128,24 @@ def research_with_ai(account, url, email_hint):
     if not web.EMAIL_RE.fullmatch(email or '-'):
         raise web.CrawlError('没找到公开邮箱，请手动填写')
     site = d.get('website') or url
+    if web.root_domain(web.host(site)) != web.root_domain(web.host(url)):
+        raise web.CrawlError('搜索结果品牌与输入网站不一致')
+    source = web.verify_email(email, d.get('email_source') or '', site, d.get('company', ''))
+    product_url = d.get('product_url') or ''
+    requested_path = web.urlsplit(url if '://' in url else 'https://' + url).path.rstrip('/')
+    if requested_path and web.urlsplit(product_url).path.rstrip('/') != requested_path:
+        raise web.CrawlError('AI 不得替换用户指定产品')
+    if web.root_domain(web.host(product_url)) != web.root_domain(web.host(site)) or web.NON_PRODUCT_PATH.search(product_url):
+        raise web.CrawlError('没有同品牌官网具体产品来源')
+    product_doc, final = web.page(product_url)
+    product = web.jsonld_product(product_doc, final)
+    if not web.valid_product(product, site):
+        raise web.CrawlError('AI 搜索产品未通过官网实体产品核验')
+    d.update(product_name=product['name'], product_url=product['url'], product_image_url=product['image_url'], product_facts=product['facts'])
     return {'company': d.get('company') or web.host(site), 'customer_brand': d.get('company') or web.host(site),
-            'website': web.normalize(site), 'domain': web.host(site), 'email': email, 'email_source': d.get('email_source', 'ai'),
+            'website': web.normalize(site), 'domain': web.host(site), 'email': email, 'email_source': source, 'email_verified': True,
+            'match_reason': '官网实体产品适配包装方案，采购需求尚未确认', 'purchase_signal': 'fit_inference',
+            'product_source': product['url'], 'purchase_signal_source': '',
             'country': d.get('country', ''), 'lang': '', 'site_description': '', 'product_name': d.get('product_name', ''),
             'product_url': d.get('product_url', ''), 'product_image_url': d.get('product_image_url', ''),
             'product_facts': [str(f) for f in (d.get('product_facts') or [])][:4], 'product_price': '', 'product_description': ''}
@@ -112,7 +153,7 @@ def research_with_ai(account, url, email_hint):
 
 def facts_for_prompt(p):
     keep = {k: p.get(k) for k in ('customer_brand', 'country', 'site_description', 'product_name', 'product_price',
-                                   'product_facts', 'product_description') if p.get(k)}
+                                   'product_facts', 'product_description', 'match_reason', 'purchase_signal', 'discovery_evidence', 'prior_contact') if p.get(k)}
     return json.dumps(keep, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -125,6 +166,8 @@ EMAIL_RULES = '''EMAIL RULES - a cold first email from {contact} at {company}; i
 - "A - <short concept name>: <one sentence: what it is + practical benefit for THIS product>"
 - "B - <short concept name>: <one sentence, clearly different structure and benefit>"
 - One short line on what we do.
+- Packaging fit is a proposal, not proof they are buying. Never invent a launch, procurement need, budget, timing or performance claim.
+- Say concepts need sample/fit/transit validation; offer to forward to their packaging colleague when writing a general brand inbox.
 - Close with ONE easy question inviting a one-word reply, e.g. {cta} Vary the wording.
 - No sign-off or signature (the app adds it). No links. 80-120 words. Plain, warm, confident {language}. Short paragraphs.
 - Banned: "I hope this email finds you well", "I came across", "elevate", "game-changer", "synergy", "reach out", "cutting-edge", "world-class", invented statistics, guarantees, certifications, prices, lead times, factory claims, other supplier names.
@@ -177,6 +220,11 @@ def writer_prompts(account, profile, p, has_photo):
     user = ('The attached photo is their real product. ' if has_photo else 'No photo available; rely on the facts. ') + \
         'Design two %s concepts for it and write the email.\nPRODUCT RESEARCH (from their website): %s' % (noun, facts_for_prompt(p)) + \
         variety_note(account, profile)
+    if profile.get('discovery_rules'):
+        system += '\nFIRST CONTACT OVERRIDE: establish that the sourcing project and supplier window are current before engineering or quotation. Write a natural 45-80 word English email with one verified project fact, one relevant identity sentence and exactly ONE short question. For tier A ask only whether suppliers/quotes are still being considered. Do not claim an A/B image is attached or already created. No specs checklist, pricing, MOQ or delivery promises. The a/b JSON fields may be empty; no image is needed at this stage.'
+        user = 'Write a short project/window confirmation using only these verified facts: ' + facts_for_prompt(p)
+    if p.get('prior_contact'):
+        system += '\nRECONTACT: This is an existing contact after the shared 7-day window, not a first introduction. Use prior_contact context. Do not repeat the previous body or claim a new/current purchase need without evidence. Add one useful, specific new angle and one easy question. Replies or future-contact agreements require review before entering this queue.'
     return system, user
 
 
@@ -200,6 +248,9 @@ def write(account, profile, p, photo):
     plan['body'] = clean_body(plan.get('body'), account)
     if not plan['subject'] or len(plan['body']) < 120:
         raise ValueError('邮件内容不完整')
+    prior=(p.get('prior_contact') or {}).get('body','')
+    if prior and re.sub(r'\W+','',prior).casefold()==re.sub(r'\W+','',plan['body']).casefold():
+        raise ValueError('不可原文重复发送上次邮件')
     others = [a.get('company_name', '') for a in config.load()['accounts'] if a['id'] != account['id']]
     text = (plan['subject'] + plan['body']).lower()
     for o in others:

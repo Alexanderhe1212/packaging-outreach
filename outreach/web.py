@@ -23,7 +23,7 @@ SKIP_EMAIL = re.compile(r'(?i)(noreply|no-reply|donotreply|example\.|sentry|wixp
                         r'^(privacy|gdpr|dpo|abuse|webmaster|careers|jobs|recruit|press|media|legal|accessibility|unsubscribe)@|'
                         r'@(sentry|shopify|myshopify|squarespace|wix|godaddy|domain|email|yourdomain|company)\.)')
 GOOD_PREFIX = ('hello', 'info', 'contact', 'sales', 'wholesale', 'enquiries', 'inquiries', 'enquiry', 'team', 'office',
-               'shop', 'studio', 'hi', 'mail', 'business', 'partnerships', 'trade', 'b2b', 'orders', 'kontakt', 'bonjour')
+               'shop', 'studio', 'hi', 'mail', 'business', 'partnerships', 'trade', 'b2b', 'kontakt', 'bonjour')
 OK_PREFIX = ('support', 'care', 'customercare', 'customerservice', 'service', 'help', 'admin', 'store')
 CONTACT_HINT = re.compile(r'(?i)contact|kontakt|impressum|imprint|about|our-story|legal|faq|wholesale|stockist|trade|customer-?service|help')
 TLD_COUNTRY = {'uk': 'United Kingdom', 'de': 'Germany', 'fr': 'France', 'nl': 'Netherlands', 'ie': 'Ireland', 'au': 'Australia',
@@ -118,6 +118,8 @@ def brand_tokens(site_root, brand=''):
 
 
 def score_email(e, site_root, brand=''):
+    if SKIP_EMAIL.search(e) or re.match(r'(?i)^(orders?|returns?|refunds?|complaints?|support|care|customercare|customerservice|help|service|shipping|tracking)@', e):
+        return -1
     local, domain = e.split('@', 1)
     if root_domain(domain) == site_root:
         s = 10
@@ -153,16 +155,47 @@ def contact_links(doc, base):
     return links
 
 
-def find_email(doc, base, brand='', limit=5):
+def business_emails(doc):
+    """Only visible public contacts; reject conflicting mailto labels and restricted inbox context."""
+    doc = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', doc or '')
+    bad = set()
+    for href, label in re.findall(r'<a[^>]+href=["\']mailto:([^"\'?]+)[^"\']*["\'][^>]*>(.*?)</a>', doc, re.I | re.S):
+        displayed = EMAIL_RE.findall(strip_tags(label))
+        if displayed and any(e.lower() != href.lower() for e in displayed):
+            bad.update(e.lower() for e in displayed)
+            bad.add(href.lower())
+    text = strip_tags(doc)
+    for match in EMAIL_RE.finditer(text):
+        context = text[max(0, match.start()-95):match.end()+50]
+        if re.search(r'(?i)(order (?:enquir|inquir|quer|status)|returns? (?:and|or|only)|refund|complaint|existing orders?|customer (?:care|support|service))', context):
+            if not re.search(r'(?i)(all|general|business|wholesale|partnership) (?:enquir|inquir|contact)', context):
+                bad.add(match.group().lower())
+    return [e for e in emails_in(doc) if e not in bad]
+
+
+def verify_email(email, source, site, brand=''):
+    """Re-read official evidence; neither a supplied email nor an AI assertion is evidence."""
+    if not EMAIL_RE.fullmatch(email or '') or root_domain(host(source)) != root_domain(host(site)):
+        raise CrawlError('邮箱必须有同品牌官网公开来源')
+    doc, final = page(source)
+    if root_domain(host(final)) != root_domain(host(site)) or email not in business_emails(doc) or score_email(email, root_domain(host(site)), brand) <= 0:
+        raise CrawlError('邮箱来源未验证或仅用于订单/售后')
+    return final
+
+
+def find_email(doc, base, brand='', limit=5, email_hint=''):
     site_root = root_domain(host(base))
-    email = best_email(emails_in(doc), site_root, brand)
+    def choose(d):
+        found = business_emails(d)
+        return best_email([email_hint] if email_hint and email_hint in found else ([] if email_hint else found), site_root, brand)
+    email = choose(doc)
     if email and root_domain(email.split('@')[1]) == site_root:
         return email, base
 
     def look(u):
         try:
             d, final = page(u)
-            return best_email(emails_in(d), site_root, brand), final
+            return (choose(d) if root_domain(host(final)) == site_root else ''), final
         except Exception:
             return '', u
 
@@ -177,7 +210,16 @@ def find_email(doc, base, brand='', limit=5):
 
 
 # ---------------- products ----------------
-SKIP_PRODUCT = re.compile(r'(?i)gift ?card|e-?gift|voucher|sample|tester|refill|shipping|insurance|donation|subscription|deposit|swatch')
+SKIP_PRODUCT = re.compile(r'(?i)gift[ -]?card|e[ -]?gift|voucher|digital download|online course|tickets?|workshop|tour experience|shipping protection|insurance|donation|deposit')
+SUPPLIER = re.compile(r'(?i)(?:packaging|rigid boxes?|paper bags?|mailer boxes?)\s+(?:manufacturer|supplier|wholesaler)|custom packaging solutions|packaging for your business')
+NON_PRODUCT_PATH = re.compile(r'(?i)/(?:blogs?|news|careers?|jobs?|press)/')
+
+def valid_product(p, base):
+    return bool(p and p.get('name') and p.get('url') and p.get('image_url')
+                and root_domain(host(p['url'])) == root_domain(host(base))
+                and not NON_PRODUCT_PATH.search(p['url'])
+                and not SKIP_PRODUCT.search(p['name'] + ' ' + p['url'])
+                and not SUPPLIER.search(p['name']))
 
 
 def _price(v):
@@ -193,12 +235,16 @@ def shopify_product(base):
         data = json.loads(raw.decode('utf-8', 'replace'))
     except Exception:
         return None
+    if not isinstance(data, dict) or not isinstance(data.get('products'), list):
+        return None
     items = []
     for p in data.get('products', []):
+        if not isinstance(p, dict):
+            continue
         if not p.get('images') or SKIP_PRODUCT.search(p.get('title', '')) or SKIP_PRODUCT.search(p.get('product_type') or ''):
             continue
         variants = p.get('variants') or [{}]
-        price = max(_price(v.get('price')) for v in variants)
+        price = max((_price(v.get('price')) for v in variants if isinstance(v,dict)),default=0)
         items.append((price, p))
     if not items:
         return None
@@ -213,7 +259,7 @@ def shopify_product(base):
         facts.append('%s: %s' % (o['name'], ', '.join(map(str, o['values'][:4]))))
     desc = strip_tags(p.get('body_html'))[:320]
     return {'name': p.get('title', ''), 'url': urljoin(base, '/products/' + p.get('handle', '')),
-            'image_url': p['images'][0].get('src', ''), 'price': ('%.2f' % price) if price else '',
+            'image_url': urljoin(base, p['images'][0].get('src', '')), 'price': ('%.2f' % price) if price else '',
             'facts': facts, 'description': desc, 'source': 'shopify'}
 
 
@@ -236,6 +282,8 @@ def jsonld_product(doc, base):
         for node in _walk(data):
             t = node.get('@type')
             if t == 'Product' or (isinstance(t, list) and 'Product' in t):
+                if SKIP_PRODUCT.search(str(node.get('name', ''))):
+                    continue
                 img = node.get('image')
                 if isinstance(img, list):
                     img = img[0] if img else ''
@@ -245,7 +293,7 @@ def jsonld_product(doc, base):
                 if isinstance(offers, list):
                     offers = offers[0] if offers else {}
                 price = offers.get('price') or offers.get('lowPrice') or ''
-                return {'name': htmllib.unescape(str(node.get('name', ''))), 'url': node.get('url') or base,
+                return {'name': htmllib.unescape(str(node.get('name', ''))), 'url': urljoin(base, str(node.get('url') or base)),
                         'image_url': urljoin(base, str(img or '')) if img else '',
                         'price': ('%s %s' % (price, offers.get('priceCurrency', ''))).strip() if price else '',
                         'facts': [], 'description': strip_tags(str(node.get('description', '')))[:320], 'source': 'jsonld'}
@@ -265,11 +313,11 @@ def product_from_links(doc, base):
         except Exception:
             continue
         p = jsonld_product(d, final)
-        if p and p.get('name'):
+        if valid_product(p, base):
             return p
         title = meta(d, 'og:title') or (re.search(r'<title>(.*?)</title>', d, re.I | re.S) or [None, ''])[1]
         img = meta(d, 'og:image', 'og:image:secure_url')
-        if title and img:
+        if title and img and not SKIP_PRODUCT.search(title) and root_domain(host(final)) == root_domain(host(base)) and (meta(d, 'og:type') == 'product' or meta(d, 'product:price:amount', 'og:price:amount')):
             price = meta(d, 'product:price:amount', 'og:price:amount')
             return {'name': strip_tags(title)[:120], 'url': final, 'image_url': urljoin(final, img),
                     'price': ('%s %s' % (price, meta(d, 'product:price:currency', 'og:price:currency'))).strip() if price else '',
@@ -299,16 +347,38 @@ def crawl(url, email_hint=''):
     if re.search(r'(?i)domain (is )?for sale|buy this domain|parked free|coming soon</title>', doc[:20000]):
         raise CrawlError('域名停放或未上线')
     brand = brand_name(doc, base)
+    description = meta(doc, 'og:description', 'description') or ''
+    if SUPPLIER.search(brand + ' ' + description):
+        raise CrawlError('包装同行供应商，不是目标品牌')
+    def select_product():
+        requested = url if '://' in url else 'https://' + url
+        if urlsplit(requested).path.strip('/'):
+            product_doc, product_final = page(requested)
+            product = jsonld_product(product_doc, product_final)
+            if not valid_product(product, base):
+                raise CrawlError('指定产品未核实，不自动换成其他商品')
+            return product
+        return shopify_product(base) or jsonld_product(doc, base) or product_from_links(doc, base)
+
     with ThreadPoolExecutor(2) as ex:  # product and email searches run side by side
-        fp = ex.submit(lambda: shopify_product(base) or jsonld_product(doc, base) or product_from_links(doc, base))
-        fe = ex.submit(lambda: (email_hint.lower().strip(), 'provided') if email_hint else find_email(doc, base, brand))
-        product, (email, source) = fp.result(), fe.result()
+        fp = ex.submit(select_product)
+        fe = ex.submit(lambda: find_email(doc, base, brand, email_hint=email_hint.lower().strip()))
+        try:
+            product, (email, source) = fp.result(), fe.result()
+        except CrawlError:
+            raise
+        except Exception as e:
+            raise CrawlError('产品或联系页面暂不可核实（%s），本批跳过' % type(e).__name__) from e
     if not email:
-        raise CrawlError('官网没有公开邮箱')
+        raise CrawlError('官网没有可验证的通用或商务邮箱')
+    if not valid_product(product, base):
+        raise CrawlError('官网没有可验证的具体实体产品')
     tld = host(base).rsplit('.', 1)[-1]
     p = {
         'company': brand, 'customer_brand': brand, 'website': base, 'domain': host(base),
-        'email': email, 'email_source': source,
+        'email': email, 'email_source': source, 'email_verified': True,
+        'match_reason': '官网实体产品 %s 可评估精品硬盒、手提袋或快递盒方案；适配推测，非采购确认' % product['name'],
+        'purchase_signal': 'fit_inference', 'purchase_signal_source': '', 'product_source': product['url'],
         'country': TLD_COUNTRY.get(tld, ''), 'lang': (re.search(r'<html[^>]+lang=["\']([\w-]+)', doc, re.I) or [None, ''])[1][:5],
         'site_description': (meta(doc, 'og:description', 'description') or '')[:300],
         'product_name': '', 'product_url': '', 'product_image_url': meta(doc, 'og:image', 'og:image:secure_url'),

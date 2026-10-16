@@ -1,5 +1,7 @@
 {
   "port": 18800,
+  "daily_limit_total": 0,
+  "cross_account_dedupe": true,
   "connections": {
     "main": {"preset": "openai", "kind": "openai", "base_url": "https://api.openai.com/v1"}
   },

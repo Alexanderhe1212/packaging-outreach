@@ -17,6 +17,7 @@
   python3 app.py quit            退出后台服务
 """
 import json
+import contextlib
 import os
 import subprocess
 import sys
@@ -37,16 +38,16 @@ URL = 'http://127.0.0.1:%d' % PORT
 APP_BROWSERS = ['Google Chrome', 'Microsoft Edge', 'Brave Browser', 'Chromium']
 
 
-def call(path, data=None):
+def call(path, data=None, timeout=30):
     req = urllib.request.Request(URL + path, data=json.dumps(data).encode() if data is not None else None,
-                                 headers={'Content-Type': 'application/json'}, method='POST' if data is not None else 'GET')
-    with urllib.request.urlopen(req, timeout=30) as r:
+                                 headers={'Content-Type': 'application/json', 'X-Outreach-Source': 'cli'}, method='POST' if data is not None else 'GET')
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
 def running():
     try:
-        return call('/api/ping').get('ok')
+        return call('/api/ping', timeout=1).get('ok')
     except Exception:
         return False
 
@@ -61,20 +62,60 @@ def open_window():
     webbrowser.open(URL)
 
 
+@contextlib.contextmanager
+def process_lock(name, blocking=True):
+    """OS-owned advisory lock; released on crash, never inferred from stale PID files."""
+    with open(config.data_dir() / name, 'a+b') as lock:
+        if sys.platform == 'win32':
+            import msvcrt
+            import time
+            if lock.seek(0, 2) == 0:
+                lock.write(b'\0'); lock.flush()
+            while True:
+                lock.seek(0)
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if not blocking:
+                        yield False
+                        return
+                    time.sleep(.05)
+            try:
+                yield True
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def ensure_running():
-    """Start the background service detached (survives the terminal / agent session that launched it)."""
+    """Serialize simultaneous desktop/CLI launches, without starting account work."""
     if running():
         return True
-    log = config.data_dir() / 'app.log'
-    with open(log, 'ab') as out:
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--no-browser'], stdout=out, stderr=out,
-                         stdin=subprocess.DEVNULL, start_new_session=True, cwd=str(Path(__file__).resolve().parent))
-    import time
-    for _ in range(60):
+    with process_lock('launcher.lock'):
         if running():
             return True
-        time.sleep(0.25)
-    return False
+        log = config.data_dir() / 'app.log'
+        with open(log, 'ab') as out:
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--no-browser'], stdout=out, stderr=out,
+                             stdin=subprocess.DEVNULL, start_new_session=True, cwd=str(Path(__file__).resolve().parent))
+        import time
+        for _ in range(60):
+            if running():
+                return True
+            time.sleep(0.25)
+        return False
 
 
 def print_status():
@@ -111,6 +152,8 @@ def cli(cmd, args):
         call('/api/pause', {'account': args[0]} if args else {})
         print('已暂停所有账号（后台仍在检查回复）。继续：outreach go')
     elif cmd == 'open':
+        from datetime import datetime, timezone
+        print('%s desktop open: service ready %s' % (datetime.now(timezone.utc).isoformat(), URL), flush=True)
         open_window()
     elif cmd == 'find':
         from urllib.parse import quote
@@ -155,23 +198,31 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if args:
         sys.exit(cli(args[0], args[1:]))
-    if running():
-        print('OutreachPilot 已在运行：' + URL)
-        open_window()
-        return
-    from outreach import server
-    httpd = server.serve(PORT)
-    if httpd is None:
-        print('端口 %d 被占用' % PORT)
-        sys.exit(1)
-    print('OutreachPilot 已启动：%s   （关闭此窗口或在界面里点「退出」即停止）' % URL, flush=True)
-    if '--no-browser' not in sys.argv:
-        import threading
-        threading.Timer(0.8, open_window).start()
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    # Hold the service lock before startup can recover jobs or start account workers.
+    with process_lock('service.lock', blocking=False) as acquired:
+        if not acquired:
+            if '--no-browser' not in sys.argv and ensure_running():
+                open_window()
+            return
+        if running():
+            if '--no-browser' not in sys.argv:
+                open_window()
+            return
+        from outreach import server
+        httpd = server.serve(PORT)
+        if httpd is None:
+            print('端口 %d 被占用' % PORT, flush=True)
+            sys.exit(1)
+        print('OutreachPilot 已启动：%s' % URL, flush=True)
+        if '--no-browser' not in sys.argv:
+            import threading
+            threading.Timer(0.8, open_window).start()
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            httpd.server_close()
 
 
 if __name__ == '__main__':

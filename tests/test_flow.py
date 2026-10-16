@@ -146,10 +146,20 @@ class FlowTest(unittest.TestCase):
                                   {'id': 'GUKA', 'name': 'GUKA', 'company_name': 'GUKA Packaging', 'sender': 'sales@second-brand.com',
                                    'smtp': {'host': 'smtp.test', 'port': 465}, 'imap': {'host': 'imap.test', 'port': 993}}]})
         config.save_secrets(keys={'main': 'sk-test'}, passwords={'MTT': 'pw'})
+        cls.originals=(web.crawl,mailer.smtplib.SMTP_SSL,mailer.sync_inbox)
         real_crawl = web.crawl
         web.crawl = lambda url, hint='': real_crawl(cls.shop, hint)  # every candidate domain resolves to the fake shop
         mailer.smtplib.SMTP_SSL = FakeSMTP
         mailer.sync_inbox = lambda acc: {'checked': 0}
+
+    @classmethod
+    def tearDownClass(cls):
+        web.crawl,mailer.smtplib.SMTP_SSL,mailer.sync_inbox=cls.originals
+        for w in server.WORKERS.values():
+            w.stopped=True;w.wake.set()
+            w.join(2)
+        server.WORKERS.clear()
+        store.close()
 
     def test_full_flow(self):
         w = AccountWorker('MTT')
@@ -211,9 +221,9 @@ class FlowTest(unittest.TestCase):
     def test_accounts_are_separate_and_concepts_vary(self):
         store.suppress('only-mtt@brand-x.com', 'legacy_contacted', 'MTT')
         self.assertTrue(store.blocked('only-mtt@brand-x.com', account='MTT'))
-        self.assertFalse(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'accounts do not share history')
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'safety exclusions always span accounts')
         config.save({'cross_account_dedupe': True})
-        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'optional cross-account lock')
+        self.assertTrue(store.blocked('only-mtt@brand-x.com', account='GUKA'), 'shared rolling contact lock')
         config.save({'cross_account_dedupe': False})
         lid = store.add_lead('MTT', 'sent', data={'plan': {'a': {'structure': 'magnetic flap rigid box'}, 'b': {'structure': 'drawer / slide box'}}})
         note = pipeline.variety_note(config.account('MTT'), config.profile('packaging'))

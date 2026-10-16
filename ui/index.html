@@ -158,7 +158,7 @@ const $=s=>document.querySelector(s), E=s=>String(s??'').replace(/[&<>"']/g,c=>(
 const ST={queued:'排队中',researching:'读官网',writing:'写邮件',imaging:'生成图',ready:'待发送',sent:'已发送',unknown:'结果未知',replied:'已回复',failed:'失败',skipped:'已跳过',bounced:'退信',unsubscribed:'退订'};
 const TABS=[['','全部'],['queued,researching,writing,imaging','准备中'],['ready','待发送'],['sent,unknown','已发送'],['replied','已回复'],['failed,skipped,bounced,unsubscribed','失败/退订']];
 let S={state:null,status:'',offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
-async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j}
+async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Outreach-Source':'ui'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j}
 function toast(m,ms=2600){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms)}
 const ago=ts=>{if(!ts)return'';const s=Date.now()/1000-ts;return s<60?'刚刚':s<3600?Math.floor(s/60)+' 分钟前':s<86400?Math.floor(s/3600)+' 小时前':new Date(ts*1000).toLocaleDateString()};
 const money=v=>v?'$'+(v<0.01?v.toFixed(4):v.toFixed(3)):'—';
@@ -218,7 +218,7 @@ async function loadLeads(reset){
 async function openLead(id){
   S.lead=id;S.editing=false;const l=await api('/api/lead/'+id),p=(l.data||{}).prospect||{},plan=(l.data||{}).plan||{};
   $('#dtitle').innerHTML=`${E(l.company||l.domain)} <span class="st ${l.status}">${ST[l.status]||l.status}</span>`;
-  const canSend=['ready','failed'].includes(l.status)&&l.subject,locked=['sent','unknown','replied','imaging','writing','researching'].includes(l.status);
+  const canSend=['ready','failed'].includes(l.status)&&l.subject,locked=['sent','sending','unknown','bounced','unsubscribed','replied','imaging','writing','researching'].includes(l.status);
   const facts=[['账号',l.account],['邮箱',`${E(l.email)} <span class="muted">${p.email_source&&p.email_source.startsWith('http')?`· <a href="${E(p.email_source)}" target="_blank">来源页</a>`:''}</span>`],
     ['官网',p.website?`<a href="${E(p.website)}" target="_blank">${E(p.website)}</a>`:''],['国家',p.country],['产品',p.product_url?`<a href="${E(p.product_url)}" target="_blank">${E(p.product_name)}</a>`:E(p.product_name)],
     ['产品信息',E([p.product_price,...(p.product_facts||[])].filter(Boolean).join(' · '))],['A 方案',E((plan.a||{}).name)],['B 方案',E((plan.b||{}).name)],
@@ -229,7 +229,7 @@ async function openLead(id){
   $('#dbody').innerHTML=`${repHtml}${fileHtml}
     <div class="row" style="margin-bottom:12px">${canSend?`<button class="primary" onclick="leadAct('send',${id})">✉ 立即发送</button>`:''}
     ${!locked&&l.subject?`<button onclick="editLead(${id})">✎ 修改文字</button>`:''}${!locked&&plan.a?`<button onclick="leadAct('redo',${id},'image')">↻ 重做图片</button>`:''}
-    ${!locked?`<button onclick="leadAct('redo',${id},'all')">↻ 重写邮件+图片</button>`:''}${!['sent','unknown','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
+    ${!locked?`<button onclick="leadAct('redo',${id},'all')">↻ 重写邮件+图片</button>`:''}${!['sent','sending','unknown','bounced','unsubscribed','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
     <div id="editArea"></div>${l.subject?`<iframe src="/preview/${id}?t=${Date.now()}"></iframe>`:'<div class="empty">邮件还在准备中…</div>'}<dl class="facts">${facts.map(f=>`<dt>${f[0]}</dt><dd>${f[1]}</dd>`).join('')}</dl>`;
   $('#drawer').classList.add('open');S._lead=l;loadLeads();
 }
@@ -285,9 +285,9 @@ async function testApi(name){collect();const t=$('#t_'+name);t.textContent='保�
 const ACC_FIELDS=[['name','显示名称'],['id','代号（英文，唯一）'],['company_name','公司名（写进邮件）'],['contact_name','联系人名字'],['from_name','发件人显示名'],['sender','发件邮箱'],['whatsapp','WhatsApp（纯数字，含国家码）'],['website','公司官网']];
 function renderAcc(){
   const st=S.settings,M=st.mail_presets,profs=st.profiles;
-  let h=`<p class="hint" style="margin-top:0">每个账号独立发信、独立资料，轮流工作（同一时间只有一个账号在准备或发送）。</p>
+  let h=`<p class="hint" style="margin-top:0">每个账号独立准备和发信；发送统一检查间隔、额度及退订名单。</p>
    <div class="form" style="margin-bottom:14px"><label>所有账号合计每日上限（封，0 = 不限）<input type="number" min="0" id="totalLimit" value="${st.daily_limit_total||0}"></label>
-   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" ${st.cross_account_dedupe?'checked':''}> 跨账号防撞：同一家公司只被一个账号联系（关闭 = 账号资料完全分开）</label></div>`;
+   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" checked disabled> GUKA/MTT 共享 7 天联系冷却；退订、拒绝、退信及未知结果继续排除</label></div>`;
   h+=st.accounts.map((a,i)=>`<fieldset><legend>${E(a.name||a.id||'新账号')}</legend><div class="form">
    ${ACC_FIELDS.map(([k,l])=>`<label>${l}<input data-a="${i}" data-k="${k}" value="${E(a[k]||'')}"></label>`).join('')}
    <label>邮箱服务商<select onchange="mailPreset(${i},this.value)"><option value="">自定义…</option>${Object.entries(M).map(([k,m])=>opt(k,m.label,a.smtp&&a.smtp.host===m.smtp.host?k:'')).join('')}</select></label>
@@ -330,7 +330,7 @@ async function archiveNow(id,dry){collect();const a=S.settings.accounts.find(x=>
   try{const r=await api('/api/archive',{account:id,dry_run:dry,days:cfg.days||7,folders:cfg.folders||['sent','trash']});
    t.textContent=(dry?'可释放：':'已存档并清理：')+`${r.archived} 封，${GB(r.bytes)}\n`+r.folders.map(f=>`${f.name}：${f.messages} 封 ${GB(f.bytes)}`).join('\n')+(dry&&r.archived>=300?'\n（每次最多处理 300 封/文件夹，可多点几次）':'')}catch(e){t.textContent='✗ '+e.message}}
 function mailPreset(i,k){if(!k)return;collect();const m=S.settings.mail_presets[k],a=S.settings.accounts[i];a.smtp={...m.smtp};a.imap={...m.imap};renderSettings()}
-function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:30,send_interval_minutes:[4,9],auto_send:false,language:'en'});renderSettings()}
+function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:0,send_interval_minutes:[4,9],auto_send:false,language:'en'});renderSettings()}
 function delAcc(i){if(!confirm('删除这个账号？已发送记录会保留。'))return;collect();S.settings.accounts.splice(i,1);renderSettings()}
 async function testMail(id){collect();const t=$('#m_'+id);t.textContent='保存并测试中…';try{await persist();const r=await api('/api/test-mail',{account:id});t.innerHTML=`<span style="color:var(--good)">✓ ${E(r.message)}</span>`}catch(e){t.innerHTML=`<span class="err">✗ ${E(e.message)}</span>`}}
 function uploadSig(id,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async()=>{try{collect();await persist();await api('/api/signature',{account:id,data:r.result});toast('签名图片已更新');openSettings('acc')}catch(e){toast(e.message)}};r.readAsDataURL(f)}
