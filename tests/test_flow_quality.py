@@ -15,6 +15,14 @@ class FlowQuality(unittest.TestCase):
   self.assertEqual(radar.research_url({'website':'https://example.test','fit_source':'https://example.test/products/cream'}),'https://example.test/products/cream')
  def test_other_domain_rejected(self):
   self.assertEqual(radar.research_url({'website':'https://example.test','fit_source':'https://evil.test/products/cream'}),'https://example.test')
+ def test_person_review_controls_greeting(self):
+  for approved in (True, False):
+   p={'company':'Example','verified_contact_name':'Jane Smith','contact_identity_evidence':[{'quote':'Jane Smith, director'}]}
+   stage=unittest.mock.Mock();stage.json.side_effect=[{'is_person':approved},{'subject':'Packaging idea','body':'Hi Example team,\n\n'+('A concrete packaging observation and fitted insert recommendation. '*4)}]
+   with patch.object(pipeline.llm,'Stage',return_value=stage),patch.object(pipeline,'writer_prompts',return_value=('system','facts')),patch.object(pipeline.config,'load',return_value={'accounts':[]}):
+    plan=pipeline.write.__wrapped__({'id':'A'},{'inquiry_first':True},p,None)
+   self.assertTrue(plan['body'].startswith('Hi Jane Smith,' if approved else 'Hi Example team,'))
+   self.assertEqual(p['recipient_identity_confirmed'],approved)
  def test_bad_image_blocks_return(self):
   from outreach import llm
   stage=unittest.mock.Mock();stage.image.return_value=b'jpg';stage.json.return_value={'approved':False,'reason':'Loose beans'}

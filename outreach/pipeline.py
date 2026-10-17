@@ -1,10 +1,4 @@
-"""开发流水线（每个客户最多 1 次写作调用 + 1 次生图；找客户每 6 家才 1 次调用）。
-
-  discover  一次便宜的调用拿到一批候选域名（有联网搜索就用，没有就凭模型知识，官网抓取负责核实）
-  crawl     零 token：从官网读公开邮箱、主推产品、产品图
-  write     一次调用：看产品图（低精度 512px）→ 设计 A/B → 写邮件，返回 JSON
-  image     一次调用：以真实产品照片为参考生成 A/B 效果图
-"""
+"""Evidence-based outreach: research, recipient review, copy, concept image and visual review."""
 import json
 import random
 import re
