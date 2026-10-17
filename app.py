@@ -122,12 +122,13 @@ def print_status():
     st = call('/api/state')
     for a in st['accounts']:
         s = a['stats']
-        print('%-6s %-4s 今日已发 %s/%s  待发 %s  准备中 %s  已回复 %s  今日费用 $%s\n       %s%s' % (
-            a['id'], '暂停' if a['paused'] else '运行', s.get('sent_today', 0), a['daily_limit'] or '不限', s.get('ready', 0),
+        print('%-6s %-4s 今日 SMTP 接受 %s/%s  待发 %s  准备中 %s  已回复 %s  今日费用 $%s\n       %s%s' % (
+            a['id'], '暂停' if a['paused'] else '运行', s.get('accepted_today', 0), a['daily_limit'] or '不限', s.get('ready', 0),
             sum(s.get(k, 0) for k in ('queued', 'researching', 'writing', 'imaging')), s.get('replied', 0), s.get('cost_today', 0),
             a['activity'], ('\n       ⚠ ' + a['error']) if a['error'] else ''))
     if st.get('legacy_running'):
         print('⚠ 旧版开发信程序仍在运行（端口 %s），请关闭以免重复发信' % st['legacy_running'])
+    print('SMTP 接受不等于送达；未知结果请在界面单独核实。')
     print('界面：' + URL)
 
 

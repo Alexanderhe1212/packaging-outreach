@@ -78,6 +78,30 @@ def signature_text(acc):
     return (acc.get('signature') or '%s\n%s\n%s' % (acc.get('contact_name', ''), acc.get('company_name', ''), acc['sender'])).strip()
 
 
+def signature_link(acc):
+    number = re.sub(r'\D', '', acc.get('whatsapp', ''))
+    return 'https://wa.me/' + number if number else ''
+
+
+def signature_markup(acc):
+    lines = []
+    for line in signature_text(acc).splitlines():
+        escaped = html.escape(line)
+        prefix, _, value = line.partition(':')
+        value = value.strip()
+        target = ''
+        if prefix.lower() == 'whatsapp':
+            target = signature_link(acc)
+        elif prefix.lower() == 'email' and re.fullmatch(r'[^\s<>@]+@[^\s<>@]+', value):
+            target = 'mailto:' + value
+        elif prefix.lower() == 'website' and value.startswith(('https://', 'http://')):
+            target = value
+        if target:
+            escaped = '<a href="%s" style="color:inherit;text-decoration:underline">%s</a>' % (html.escape(target, quote=True), escaped)
+        lines.append(escaped)
+    return '<br>'.join(lines)
+
+
 _sig_cache = {}
 
 
@@ -88,7 +112,8 @@ def signature_image(acc):
     if path not in _sig_cache:
         try:
             from .pipeline import to_jpeg
-            _sig_cache[path] = to_jpeg(config.resolve(path).read_bytes(), 760, 72, keep_below=60000)
+            raw = config.resolve(path).read_bytes()
+            _sig_cache[path] = raw if acc.get('signature_original') else to_jpeg(raw, 760, 72, keep_below=60000)
         except Exception:
             _sig_cache[path] = None
     return _sig_cache[path]
@@ -114,32 +139,43 @@ def _base_msg(acc, to, subject, message_id=None):
 def build(acc, lead, image_bytes):
     company = lead['data'].get('prospect', {}).get('customer_brand') or lead['company']
     body, sig, sig_img = lead['body'], signature_text(acc), signature_image(acc)
-    opt_out = '' if 'no thanks' in sig.lower() else OPT_OUT
+    opt_out = '' if 'no thanks' in sig.lower() else acc.get('signature_opt_out', OPT_OUT)
     has_wa = bool(acc.get('whatsapp'))
-    links = [('A', wa_link(acc, company, 'A')), ('B', wa_link(acc, company, 'B'))] if has_wa else []
+    options = ('A','B','C') if lead['data'].get('plan',{}).get('c') else ('A','B')
+    links = [(k, wa_link(acc, company, k)) for k in options] if has_wa else []
     E = html.escape
     paras = ''.join('<p style="margin:0 0 14px">%s</p>' % E(x).replace('\n', '<br>') for x in body.split('\n\n'))
     parts = ['<div style="max-width:620px;font:15px/1.6 -apple-system,Segoe UI,Arial,sans-serif;color:#222">', paras]
     if image_bytes:
-        parts.append('<img src="cid:concept" width="620" alt="Concepts A and B for %s" '
-                     'style="display:block;width:100%%;max-width:620px;height:auto;border-radius:6px;margin:6px 0 14px">' % E(company))
+        concept_picture = ('<img src="cid:concept" width="620" alt="Packaging concepts for %s — chat on WhatsApp" '
+                           'style="display:block;border:0;width:100%%;max-width:620px;height:auto;border-radius:6px;margin:6px 0 14px">' % E(company))
+        if has_wa:
+            concept_picture = '<a href="%s" title="Discuss these concepts on WhatsApp" style="display:block;text-decoration:none">%s</a>' % (E(wa_link(acc, company), quote=True), concept_picture)
+        parts.append(concept_picture)
         if links:
             parts.append('<p style="margin:0 0 16px">' + ' &nbsp;·&nbsp; '.join(
                 '<a href="%s" style="color:#1f8a70;font-weight:600;text-decoration:none">Discuss concept %s on WhatsApp &rarr;</a>'
                 % (E(u, quote=True), k) for k, u in links) + '</p>')
     parts.append('<p style="margin:0 0 6px">Best regards,</p>')
-    parts.append('<p style="margin:0 0 10px;color:#444;font-size:14px">%s</p>' % E(sig).replace('\n', '<br>'))
-    if sig_img:
-        parts.append('<img src="cid:signature" width="560" alt="%s" style="display:block;width:100%%;max-width:560px;height:auto">'
-                     % E(acc.get('company_name', '')))
+    parts.append('<p style="margin:0 0 10px;color:#444;font-size:14px">%s</p>' % signature_markup(acc))
     if opt_out:
         parts.append('<p style="margin:14px 0 0;color:#999;font-size:12px">%s</p>' % E(opt_out))
+    chat = signature_link(acc)
+    if acc.get('signature_clickable') and chat:
+        parts.append('<p style="margin:16px 0"><a href="%s" style="color:#1f8a70;text-decoration:none">Chat with %s on WhatsApp &rarr;</a></p>' % (E(chat, quote=True), E(acc.get('contact_name', 'Hugo').split()[0])))
+    if sig_img:
+        picture = '<img src="cid:signature" width="560" alt="%s" style="display:block;border:0;width:100%%;max-width:560px;height:auto">' % E(acc.get('company_name', ''))
+        if acc.get('signature_clickable') and chat:
+            picture = '<a href="%s" style="display:block;text-decoration:none">%s</a>' % (E(chat, quote=True), picture)
+        parts.append(picture)
     parts.append('</div>')
     markup = '<!doctype html><html><head><meta charset="utf-8"></head><body>%s</body></html>' % ''.join(parts)
     plain = body + '\n\n'
     if image_bytes and links:
         plain += '\n'.join('Discuss concept %s on WhatsApp: %s' % (k, u) for k, u in links) + '\n\n'
     plain += 'Best regards,\n' + sig + ('\n\n' + opt_out if opt_out else '')
+    if acc.get('signature_clickable') and chat:
+        plain += '\n\nChat on WhatsApp: ' + chat
 
     msg = _base_msg(acc, lead['email'], lead['subject'], lead.get('message_id') or None)
     msg.set_content(plain)
@@ -149,7 +185,8 @@ def build(acc, lead, image_bytes):
         htmlpart.add_related(image_bytes, maintype='image', subtype='jpeg' if image_bytes[:2] == b'\xff\xd8' else 'png',
                              cid='<concept>', filename='concepts.jpg')
     if sig_img:
-        htmlpart.add_related(sig_img, maintype='image', subtype='jpeg', cid='<signature>', filename='signature.jpg')
+        subtype = 'png' if sig_img.startswith(b'\x89PNG') else 'jpeg'
+        htmlpart.add_related(sig_img, maintype='image', subtype=subtype, cid='<signature>', filename='signature.' + subtype)
     return msg
 
 
@@ -159,10 +196,9 @@ def build_followup(acc, lead, profile):
     body = tpl.format(brand=p.get('customer_brand') or lead['company'], product=p.get('product_name') or 'your product',
                       contact=acc.get('contact_name', ''))
     subject = lead['subject'] if lead['subject'].lower().startswith('re:') else 'Re: ' + lead['subject']
-    msg = _base_msg(acc, lead['email'], subject)
+    msg = build(acc, dict(lead, subject=subject, body=body, message_id=''), None)
     msg['In-Reply-To'] = lead['message_id']
     msg['References'] = lead['message_id']
-    msg.set_content(body + '\n\nBest regards,\n' + signature_text(acc))
     return msg
 
 
@@ -173,7 +209,8 @@ def preview_html(acc, lead, image_bytes):
         markup = markup.replace('cid:concept', 'data:image/jpeg;base64,' + base64.b64encode(image_bytes).decode())
     sig = signature_image(acc)
     if sig:
-        markup = markup.replace('cid:signature', 'data:image/jpeg;base64,' + base64.b64encode(sig).decode())
+        subtype = 'png' if sig.startswith(b'\x89PNG') else 'jpeg'
+        markup = markup.replace('cid:signature', 'data:image/' + subtype + ';base64,' + base64.b64encode(sig).decode())
     head = ('<div style="font:13px -apple-system,Arial;color:#666;border-bottom:1px solid #eee;padding:0 0 10px;margin:0 0 14px">'
             '<b>From:</b> %s<br><b>To:</b> %s<br><b>Subject:</b> %s</div>') % (
         html.escape(str(msg['From'])), html.escape(lead['email']), html.escape(lead['subject']))

@@ -12,10 +12,21 @@ import ssl
 import urllib.error
 import urllib.request
 from urllib.parse import urljoin, urlsplit
+from .fetch_guard import DeferredFetch, FetchGuard
+
+def _load_fetch_state():
+    from . import store
+    return store.get('public_fetch_guard_v1', {})
+
+def _save_fetch_state(state):
+    from . import store
+    store.put('public_fetch_guard_v1', state)
+
+FETCH_GUARD = FetchGuard(_load_fetch_state, _save_fetch_state)
 
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/129.0 Safari/537.36')
-EMAIL_RE = re.compile(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}', re.I)
+EMAIL_RE = re.compile(r'(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,253}\.[A-Z]{2,24}(?![A-Z0-9-])', re.I)
 FREEMAIL = {'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'hotmail.co.uk', 'yahoo.com', 'yahoo.co.uk',
             'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.de', 'gmx.net', 'web.de', 'live.com',
             'live.co.uk', 'btinternet.com', 'qq.com', '163.com', '126.com', 'yandex.com', 'mail.com', 'orange.fr', 'free.fr'}
@@ -36,7 +47,7 @@ class CrawlError(ValueError):
 
 
 # ---------------- fetching ----------------
-def get(url, accept='text/html,application/xhtml+xml,*/*;q=0.8', max_bytes=4 * 1024 * 1024, timeout=12):
+def _get_once(url, accept='text/html,application/xhtml+xml,*/*;q=0.8', max_bytes=4 * 1024 * 1024, timeout=12):
     req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': accept, 'Accept-Language': 'en;q=0.9,*;q=0.5'})
     try:
         r = urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context())
@@ -99,11 +110,17 @@ def meta(doc, *names):
 # ---------------- emails ----------------
 def emails_in(doc):
     text = htmllib.unescape(doc or '')
+    # Collapse runs once before patterns with leading whitespace. Otherwise a
+    # long run without an obfuscated address causes quadratic backtracking and
+    # holds the GIL, starving both account workers and the HTTP server.
+    text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*(\[at\]|\(at\)|\{at\}|&#64;| at )\s*', '@', text, flags=re.I)
     text = re.sub(r'\s*(\[dot\]|\(dot\))\s*', '.', text, flags=re.I)
     text = text.replace('%40', '@')
     out = []
     for e in EMAIL_RE.findall(text):
+        if len(e) > 254:
+            continue
         e = e.lower().strip('.').lstrip('/')
         if e.startswith('u003e') or e.startswith('mailto:'):
             e = e.split(':')[-1].replace('u003e', '')
@@ -158,23 +175,39 @@ def contact_links(doc, base):
 def business_emails(doc):
     """Only visible public contacts; reject conflicting mailto labels and restricted inbox context."""
     doc = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', doc or '')
-    bad = set()
-    for href, label in re.findall(r'<a[^>]+href=["\']mailto:([^"\'?]+)[^"\']*["\'][^>]*>(.*?)</a>', doc, re.I | re.S):
-        displayed = EMAIL_RE.findall(strip_tags(label))
-        if displayed and any(e.lower() != href.lower() for e in displayed):
-            bad.update(e.lower() for e in displayed)
-            bad.add(href.lower())
-    text = strip_tags(doc)
-    for match in EMAIL_RE.finditer(text):
-        context = text[max(0, match.start()-95):match.end()+50]
-        if re.search(r'(?i)(order (?:enquir|inquir|quer|status)|returns? (?:and|or|only)|refund|complaint|existing orders?|customer (?:care|support|service))', context):
-            if not re.search(r'(?i)(all|general|business|wholesale|partnership) (?:enquir|inquir|contact)', context):
-                bad.add(match.group().lower())
-    return [e for e in emails_in(doc) if e not in bad]
+    # Decode public Cloudflare email spans; this is published text, not a guessed address.
+    def decode_public(match):
+        try:
+            raw = bytes.fromhex(match.group(2))
+            email = bytes(b ^ raw[0] for b in raw[1:]).decode('utf-8')
+            return match.group(0) + htmllib.escape(email) if EMAIL_RE.fullmatch(email) else match.group(0)
+        except (ValueError, IndexError, UnicodeDecodeError):
+            return match.group(0)
+    doc = re.sub(r"(?i)<[^>]+data-cfemail=([\"'])([a-f0-9]+)\1[^>]*>", decode_public, doc)
+    # Discard only the contradictory occurrence, not independent valid evidence elsewhere.
+    def clear_conflict(match):
+        href = htmllib.unescape(match.group(1)).strip()
+        displayed = EMAIL_RE.findall(strip_tags(match.group(2)))
+        return ' ' if displayed and any(e.lower() != href.lower() for e in displayed) else match.group(0)
+    doc = re.sub(r"<a[^>]+href=[\"']mailto:([^\"'?]+)[^\"']*[\"'][^>]*>(.*?)</a>", clear_conflict, doc, flags=re.I | re.S)
+    found = []
+    # Context is local to a contact block. A returns section elsewhere must not
+    # invalidate a separately published general or trade enquiry address.
+    for block in re.split(r'(?i)</?(?:p|div|li|section|footer|br|h[1-6])\b[^>]*>', doc):
+        text = strip_tags(block)
+        bad = set()
+        for match in EMAIL_RE.finditer(text):
+            context = text[max(0, match.start()-95):match.end()+50]
+            if re.search(r'(?i)(order (?:enquir|inquir|quer|status)|returns? (?:and|or|only)|refund|complaint|existing orders?)', context):
+                if not re.search(r'(?i)(all|general|business|wholesale|partnership) (?:enquir|inquir|contact)', context):
+                    bad.add(match.group().lower())
+        found.extend(e for e in emails_in(block) if e not in bad and e not in found)
+    return found
 
 
 def verify_email(email, source, site, brand=''):
     """Re-read official evidence; neither a supplied email nor an AI assertion is evidence."""
+    email = (email or '').strip().lower()
     if not EMAIL_RE.fullmatch(email or '') or root_domain(host(source)) != root_domain(host(site)):
         raise CrawlError('邮箱必须有同品牌官网公开来源')
     doc, final = page(source)
@@ -184,6 +217,7 @@ def verify_email(email, source, site, brand=''):
 
 
 def find_email(doc, base, brand='', limit=5, email_hint=''):
+    email_hint = (email_hint or '').strip().lower()
     site_root = root_domain(host(base))
     def choose(d):
         found = business_emails(d)
@@ -192,11 +226,14 @@ def find_email(doc, base, brand='', limit=5, email_hint=''):
     if email and root_domain(email.split('@')[1]) == site_root:
         return email, base
 
+    transient_errors = []
     def look(u):
         try:
             d, final = page(u)
             return (choose(d) if root_domain(host(final)) == site_root else ''), final
-        except Exception:
+        except Exception as exc:
+            transient = transient_failure(exc)
+            if transient: transient_errors.append(transient)
             return '', u
 
     fallback = (email, base) if email else ('', '')
@@ -206,6 +243,8 @@ def find_email(doc, base, brand='', limit=5, email_hint=''):
                 return e, final
             if e and not fallback[0]:
                 fallback = (e, final)
+    if not fallback[0] and transient_errors:
+        raise CrawlError("联系页临时不可读取，延后核实") from transient_errors[0]
     return fallback
 
 
@@ -302,6 +341,11 @@ def jsonld_product(doc, base):
 
 def product_from_links(doc, base):
     links = re.findall(r'href=["\']([^"\']*/(?:products?|shop|item|p)/[^"\'?#]+)', doc, re.I)
+    # BigCommerce uses flat product URLs; card headings identify candidates,
+    # while the fetched product page must still pass the existing product checks.
+    cards = re.findall(r'<h[1-6][^>]*class=["\'][^"\']*card-title[^"\']*["\'][^>]*>(.*?)</h[1-6]>', doc, re.I | re.S)
+    for card in cards:
+        links.extend(re.findall(r'href=["\']([^"\'?#]+)', card, re.I))
     seen = []
     for href in links:
         u = urljoin(base, href)
@@ -336,13 +380,13 @@ def brand_name(doc, base):
     return name.strip()
 
 
-def crawl(url, email_hint=''):
+def crawl(url, email_hint='', email_sources=None):
     """Return a prospect dict built only from the company's own public pages. Raises CrawlError with a short reason."""
     base = normalize(url)
     try:
         doc, final = page(base)
     except Exception as e:
-        raise CrawlError('打不开官网（%s）' % type(e).__name__)
+        raise CrawlError('打不开官网（%s）' % web_error_label(e)) from e
     base = normalize(final)
     if re.search(r'(?i)domain (is )?for sale|buy this domain|parked free|coming soon</title>', doc[:20000]):
         raise CrawlError('域名停放或未上线')
@@ -360,17 +404,34 @@ def crawl(url, email_hint=''):
             return product
         return shopify_product(base) or jsonld_product(doc, base) or product_from_links(doc, base)
 
-    with ThreadPoolExecutor(2) as ex:  # product and email searches run side by side
-        fp = ex.submit(select_product)
-        fe = ex.submit(lambda: find_email(doc, base, brand, email_hint=email_hint.lower().strip()))
-        try:
-            product, (email, source) = fp.result(), fe.result()
-        except CrawlError:
-            raise
-        except Exception as e:
-            raise CrawlError('产品或联系页面暂不可核实（%s），本批跳过' % type(e).__name__) from e
-    if not email:
-        raise CrawlError('官网没有可验证的通用或商务邮箱')
+    try:
+        email, source = '', ''
+        # Saved evidence is a navigation hint only: re-read it with the normal verifier.
+        for candidate in (email_sources or [])[:3]:
+            if not isinstance(candidate, str) or root_domain(host(candidate)) != root_domain(host(base)):
+                continue
+            try:
+                hint = email_hint.lower().strip()
+                if not hint:
+                    evidence, evidence_url = page(candidate)
+                    if root_domain(host(evidence_url)) != root_domain(host(base)):
+                        continue
+                    hint = best_email(business_emails(evidence), root_domain(host(base)), brand)
+                source = verify_email(hint, candidate, base, brand)
+                email = hint
+                break
+            except Exception as exc:
+                if transient_failure(exc):
+                    raise CrawlError('已保存的邮箱来源暂不可读取，延后核实') from exc
+        if not email:
+            email, source = find_email(doc, base, brand, email_hint=email_hint.lower().strip())
+        if not email:
+            raise CrawlError('官网没有可验证的通用或商务邮箱')
+        product = select_product()
+    except CrawlError:
+        raise
+    except Exception as e:
+        raise CrawlError('产品或联系页面暂不可核实（%s）' % web_error_label(e)) from e
     if not valid_product(product, base):
         raise CrawlError('官网没有可验证的具体实体产品')
     tld = host(base).rsplit('.', 1)[-1]
@@ -425,3 +486,55 @@ def product_image(image_url, page_url=None):
         except Exception:
             continue
     return None, None
+
+
+# Read-only public fetch retries. No SMTP code calls these functions.
+def transient_failure(exc):
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, DeferredFetch): return exc
+        if isinstance(exc, urllib.error.HTTPError):
+            if exc.code in (408, 429, 500, 502, 503, 504): return exc
+        elif isinstance(exc, (TimeoutError, ConnectionError)):
+            return exc
+        elif isinstance(exc, urllib.error.URLError):
+            # Certificate, permission and DNS-not-found failures are not retried here.
+            reason = getattr(exc, 'reason', None)
+            if isinstance(reason, (TimeoutError, ConnectionError)): return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def retry_after(exc):
+    import time
+    from email.utils import parsedate_to_datetime
+    if getattr(exc, 'retry_at', None):
+        return max(0., exc.retry_at-time.time())
+    raw = getattr(exc, 'headers', {}).get('Retry-After', '') if getattr(exc, 'headers', None) else ''
+    try: return max(0., float(raw))
+    except (ValueError, TypeError):
+        try: return max(0., parsedate_to_datetime(raw).timestamp()-time.time())
+        except (ValueError, TypeError, OverflowError): return 0.
+
+
+def web_error_label(exc):
+    if isinstance(exc, DeferredFetch):
+        return '限流等待，未发起新请求'
+    if isinstance(exc, urllib.error.HTTPError):
+        return 'HTTP %s%s' % (exc.code, ' 临时错误，等待重试' if transient_failure(exc) else '，需核实来源')
+    return type(exc).__name__
+
+
+def get(url, accept='text/html,application/xhtml+xml,*/*;q=0.8', max_bytes=4*1024*1024, timeout=12):
+    domain = root_domain(host(url))
+    with FETCH_GUARD.request(domain):
+        try:
+            result = _get_once(url, accept, max_bytes, timeout)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            transient = transient_failure(exc)
+            if transient:
+                transient.retry_at = FETCH_GUARD.failed(domain, getattr(transient, 'code', None), retry_after(transient))
+            raise
+        FETCH_GUARD.succeeded(domain)
+        return result

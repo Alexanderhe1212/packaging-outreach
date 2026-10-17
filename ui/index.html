@@ -101,8 +101,12 @@ legend{padding:0 6px;font-weight:600}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;flex:none}
 @keyframes sp{to{transform:rotate(360deg)}}
+.stale{opacity:.55}.stale .pill.run::after{content:" · 旧数据"}.stale .dot{animation:none!important;background:var(--muted)!important}button:disabled{opacity:.5;cursor:wait}.hint{line-height:1.6}
+#accounts .activity{height:48px;overflow:hidden;line-height:24px}#accounts .account-error{height:36px;overflow:auto;margin:4px 0;line-height:18px}#accounts .kpi b{font-variant-numeric:tabular-nums}#accounts .hint{min-height:40px}.tabs{min-height:36px}
 @media (max-width:720px){header{padding:10px 14px}main{padding:14px}.kpis{grid-template-columns:repeat(2,1fr)}.stage{grid-template-columns:1fr}.subj,.hide-sm{display:none}}
-</style>
+
+main{max-width:1120px}.lead-table{table-layout:fixed;font-size:13px}.lead-table th:nth-child(1){width:30%}.lead-table th:nth-child(2){width:37%}.lead-table th:nth-child(3){width:21%}.lead-table th:nth-child(4){width:12%}.lead-table td{overflow-wrap:anywhere;white-space:normal!important;padding:12px 10px}.lead-table .co b{font-size:14px}.lead-table .co small{display:block;font-size:11px;margin-top:4px}.lead-table .mail-summary{white-space:normal;line-height:1.6}.lead-table .err{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.lead-table .st{white-space:normal;display:inline-block}#strip{display:none}
+.compact-view #accounts,.compact-view #strip,.compact-view main>details,.compact-view main>p,.compact-view header .logo,.compact-view header button[onclick="location.href='/radar'"]{display:none}.compact-view header{justify-content:flex-end;flex-wrap:wrap}.reply-view header,.reply-view #tabs{display:none}.compact-view .row{flex-wrap:wrap}.compact-view #fq{max-width:180px}.compact-view .tabs button{padding:5px 7px;font-size:12px}</style>
 </head>
 <body>
 <header>
@@ -111,13 +115,18 @@ legend{padding:0 6px;font-weight:600}
   <button class="primary" onclick="ctl('start')">▶ 全部开始</button>
   <button onclick="ctl('pause')">⏸ 全部暂停</button>
   <button onclick="openAdd()">＋ 添加客户</button>
+  <button onclick="location.href='/radar'">◎ 用户雷达客户</button>
   <button onclick="openSettings()">⚙ 设置</button>
   <button class="ghost" title="退出后台服务" onclick="quitApp()">⏻</button>
 </header>
 <main>
-  <div id="banner"></div>
+  <div id="freshness" class="hint" role="status" aria-live="polite">正在读取后台状态…</div>
+  <div id="banner" role="alert"></div>
+  <p class="hint">开始会按各账号设置自动准备并发送；SMTP 已接受不等于送达。未知发送结果需核实，禁止盲目重发。</p>
   <div class="grid" id="accounts"></div>
+  <div id="listNotice" class="hint" style="min-height:28px" aria-live="polite"></div>
   <div class="strip" id="strip"></div>
+  <details class="card" style="margin-bottom:16px"><summary>阶段耗时与用量（近 7 天）</summary><div id="operations" class="hint">读取中…</div></details>
   <div class="card" style="padding:10px 6px">
     <div class="row" style="padding:0 8px 8px;justify-content:space-between">
       <div class="tabs" id="tabs"></div>
@@ -126,10 +135,11 @@ legend{padding:0 6px;font-weight:600}
         <input id="fq" placeholder="搜索公司 / 邮箱 / 主题" oninput="clearTimeout(window._q);window._q=setTimeout(()=>loadLeads(true),300)" style="width:220px">
       </div>
     </div>
-    <table><thead><tr><th>客户</th><th class="hide-sm">邮箱</th><th class="subj">主题</th><th>状态</th><th class="hide-sm">成本</th><th>更新</th></tr></thead>
+    <table class="lead-table"><thead><tr><th>客户 / 邮箱</th><th>邮件 · 点击检查内容</th><th>发送状态</th><th>更新</th></tr></thead>
       <tbody id="leads"></tbody></table>
     <div class="row" style="justify-content:center;padding:10px" id="pager"></div>
   </div>
+  <details class="hint" id="feedback" style="margin-top:16px"><summary>问题反馈</summary><p>请邮件联系 <a href="mailto:info@mttpackaging.com">info@mttpackaging.com</a>，提供版本号、复现步骤、预期与实际结果，以及必要的脱敏截图。请勿发送密码、API Key、客户资料或原始数据库。邮件链接只会打开邮件客户端，不会自动发送。</p></details>
 </main>
 
 <div class="drawer" id="drawer"><div class="dhead"><b id="dtitle" style="flex:1"></b><button class="ghost" onclick="closeDrawer()">✕</button></div><div class="dbody" id="dbody"></div></div>
@@ -141,7 +151,7 @@ legend{padding:0 6px;font-weight:600}
     <label>邮箱（可选，只加一家时有效）<input id="addEmail" placeholder="hello@brand.com"></label>
     <label class="wide">客户官网或邮箱，每行一个（可一次粘贴很多）<textarea id="addUrls" rows="7" placeholder="https://brand.com&#10;anotherbrand.co.uk&#10;hello@thirdbrand.com"></textarea></label>
     <label class="chk wide"><input type="checkbox" id="addForce"> 即使联系过也添加（不会跳过退订 / 退信）</label>
-  </div><p class="hint">系统会读取官网的公开邮箱和主推产品，写邮件、生成 A/B 图，然后按账号设置发送或等你审核。</p></div>
+  </div><p class="hint">系统会读取官网的公开邮箱和主推产品，写邮件、生成方案图（按当前 ABC 配置），然后按账号设置发送或等你审核。</p></div>
   <div class="mfoot"><button onclick="closeModal('addModal')">取消</button><button class="primary" onclick="doAdd()">添加</button></div>
 </div></div>
 
@@ -154,38 +164,94 @@ legend{padding:0 6px;font-weight:600}
 <div class="toast" id="toast"></div>
 
 <script>
+const viewParams=new URLSearchParams(location.search);if(['writing','images'].includes(viewParams.get('stage'))){const style=document.createElement('style');style.textContent='#tabs{display:none}';document.head.append(style);}document.body.classList.toggle('compact-view',viewParams.get('view')==='compact'||viewParams.get('status')==='replied');document.body.classList.toggle('reply-view',viewParams.get('status')==='replied');
+
 const $=s=>document.querySelector(s), E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const ST={queued:'排队中',researching:'读官网',writing:'写邮件',imaging:'生成图',ready:'待发送',sent:'已发送',unknown:'结果未知',replied:'已回复',failed:'失败',skipped:'已跳过',bounced:'退信',unsubscribed:'退订'};
-const TABS=[['','全部'],['queued,researching,writing,imaging','准备中'],['ready','待发送'],['sent,unknown','已发送'],['replied','已回复'],['failed,skipped,bounced,unsubscribed','失败/退订']];
-let S={state:null,status:'',offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
-async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Outreach-Source':'ui'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j}
+const ST={queued:'排队中',researching:'读官网',writing:'写邮件',imaging:'生成图',ready:'待发送',sent:'SMTP 已接受',unknown:'待核实发送',sending:'发送中',backlog:'后备待核实',replied:'已回复',failed:'失败',skipped:'已跳过',bounced:'退信',unsubscribed:'退订'};
+const TABS=[['','开发记录'],['queued,researching,writing,imaging','准备中'],['ready','待发送'],['sent','SMTP 已接受'],['unknown','待核实发送'],['backlog','后备'],['replied','回复'],['failed,skipped,bounced,unsubscribed','失败/退订']];
+let S={state:null,status:(viewParams.get('status')||'').split(',').filter(x=>Object.hasOwnProperty.call(ST,x)).join(','),offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
+// Preserve node identity, focus and scroll during background polling.
+function nodeKey(n){return n.nodeType===1?(n.getAttribute('data-key')||n.id||''):''}
+function patchNode(old,fresh){
+ if(old.nodeType!==fresh.nodeType||old.nodeName!==fresh.nodeName){const n=fresh.cloneNode(true);old.replaceWith(n);return n}
+ if(old.nodeType!==1){if(old.nodeValue!==fresh.nodeValue)old.nodeValue=fresh.nodeValue;return old}
+ const focused=old===document.activeElement;
+ if(focused&&['SELECT','TEXTAREA'].includes(old.tagName))return old;
+ for(const a of [...old.attributes])if(!fresh.hasAttribute(a.name)&&!(focused&&a.name==='value'))old.removeAttribute(a.name);
+ for(const a of [...fresh.attributes])if(old.getAttribute(a.name)!==a.value&&!(focused&&a.name==='value'))old.setAttribute(a.name,a.value);
+ patchChildren(old,fresh);return old;
+}
+function patchChildren(parent,fresh){
+ const keyed=new Map([...parent.childNodes].filter(nodeKey).map(n=>[nodeKey(n),n]));
+ let cursor=parent.firstChild;
+ for(const wanted of [...fresh.childNodes]){
+  const key=nodeKey(wanted);let current=key?keyed.get(key):cursor;
+  if(current&&nodeKey(current)!==key)current=null;
+  if(!current){current=wanted.cloneNode(true);parent.insertBefore(current,cursor)}
+  else{if(current!==cursor)parent.insertBefore(current,cursor);current=patchNode(current,wanted)}
+  cursor=current.nextSibling;
+ }
+ while(cursor){const next=cursor.nextSibling;cursor.remove();cursor=next}
+}
+function patchHTML(parent,html){
+ const template=document.createElement('template');template.innerHTML=html;
+ const x=window.scrollX,y=window.scrollY,top=parent.scrollTop;
+ patchChildren(parent,template.content);parent.scrollTop=top;
+ if(window.scrollX!==x||window.scrollY!==y)window.scrollTo(x,y);
+}
+const pendingMutations=new Set();let lastStateAt=null,refreshing=false;
+function syncBusy(){document.querySelectorAll('button[onclick]').forEach(b=>{if(/ctl\(|leadAct\(|saveSettings\(|saveEdit\(|quitApp\(/.test(b.getAttribute('onclick')))b.disabled=pendingMutations.size>0})}
+async function api(path,data){
+ const mutation=data!==undefined,key=path+':'+(data?.id||data?.account||'all');
+ if(mutation&&pendingMutations.has(key))throw new Error('操作正在处理，请勿重复提交');
+ if(mutation){pendingMutations.add(key);syncBusy()}
+ const controller=new AbortController(),timer=mutation?null:setTimeout(()=>controller.abort(),15000);
+ try{const r=await fetch(path,mutation?{method:'POST',headers:{'Content-Type':'application/json','X-Outreach-Source':'ui'},body:JSON.stringify(data)}:{signal:controller.signal});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j}
+ finally{if(timer)clearTimeout(timer);if(mutation){pendingMutations.delete(key);syncBusy()}}
+}
+function filterQueue(account,status){$('#facc').value=account;S.status=status;loadLeads(true).catch(e=>toast(e.message));$('#tabs').scrollIntoView({block:'nearest'})}
+
 function toast(m,ms=2600){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms)}
 const ago=ts=>{if(!ts)return'';const s=Date.now()/1000-ts;return s<60?'刚刚':s<3600?Math.floor(s/60)+' 分钟前':s<86400?Math.floor(s/3600)+' 小时前':new Date(ts*1000).toLocaleDateString()};
-const money=v=>v?'$'+(v<0.01?v.toFixed(4):v.toFixed(3)):'—';
+const money=v=>v==null?'未计价':v===0?'未计价 / 零值记录':'$'+(v<0.01?v.toFixed(4):v.toFixed(3));
+const elapsed=t=>t==null?'未记录':Math.max(0,Math.floor(Date.now()/1000-t))+' 秒';
+const stamp=t=>t?new Date(t*1000).toLocaleString():'无记录';
 
 async function ctl(what,account){try{await api('/api/'+what,account?{account}:{});toast(what==='start'?'已开始':'已暂停');refresh()}catch(e){toast(e.message)}}
 async function quitApp(){if(!confirm('退出后台服务？发送和准备都会停止，下次打开从原处继续。'))return;await api('/api/quit',{});document.body.innerHTML='<div class="empty">OutreachPilot 已退出，可以关闭这个窗口。</div>'}
 
 async function refresh(){
-  try{S.state=await api('/api/state')}catch(e){$('#banner').innerHTML='<div class="banner">后台服务没有响应：'+E(e.message)+'</div>';return}
+  if(refreshing)return;refreshing=true;
+  try{S.state=await api('/api/state');lastStateAt=Date.now()/1000;$('#accounts').classList.remove('stale')}
+  catch(e){$('#accounts').classList.add('stale');$('#freshness').textContent='连接中断 · 以下是旧数据，最后成功读取 '+stamp(lastStateAt);$('#banner').innerHTML='<div class="banner">后台没有响应，无法确认当前运行状态。'+E(e.message)+'</div>';return}
+  finally{refreshing=false}
+  $('#freshness').textContent='最后成功读取 '+stamp(lastStateAt)+' · 后台时间 '+stamp(S.state.server_time);
   const st=S.state;$('#ver').textContent='v'+st.version;$('#ddir').textContent=st.data_dir;
   let b='';if(!st.api_ready)b+='<div class="banner">第一步：点右上角 <b>⚙ 设置 → AI 接口</b>，选择服务商并填写 API Key，点「测试」通过后保存。</div>';
   if((st.legacy_running||[]).length)b+=`<div class="banner">⚠ 检测到旧版开发信程序仍在运行（端口 ${st.legacy_running.join(', ')}）。为避免同一个邮箱被两套程序同时发信，请先关闭旧程序的终端窗口，再点「开始」。</div>`;
   if(!st.accounts.length)b+='<div class="banner">还没有发信账号：在 <b>⚙ 设置 → 账号</b> 里添加。</div>';
   $('#banner').innerHTML=b;
-  $('#accounts').innerHTML=st.accounts.map(a=>{const s=a.stats,lim=a.daily_limit,pct=lim?Math.min(100,100*(s.sent_today||0)/lim):0;
+  patchHTML($('#accounts'),st.accounts.map(a=>{const s=a.stats,lim=a.daily_limit,pct=lim?Math.min(100,100*(s.accepted_today||0)/lim):0;
     const working=['queued','researching','writing','imaging'].reduce((n,k)=>n+(s[k]||0),0);
-    return `<div class="card"><div class="acc-head"><span class="acc-name">${E(a.name)}</span><span class="pill ${a.paused?'':'run'}">${a.paused?'已暂停':'运行中'}</span>
+    return `<div class="card" data-key="account-${E(a.id)}"><div class="acc-head"><span class="acc-name">${E(a.name)}</span><span class="pill ${a.paused?'':'run'}">${a.paused?'已暂停':a.worker_alive?'运行中':'工作线程未运行'}</span>
       <span class="muted" style="font-size:12px">${E(a.sender)}</span><div class="spacer"></div>
       ${a.paused?`<button class="primary small" onclick="ctl('start','${a.id}')">开始</button>`:`<button class="small" onclick="ctl('pause','${a.id}')">暂停</button>`}</div>
-      <div class="activity"><span class="dot ${a.paused?'':'live'}"></span>${E(a.activity||'—')}</div>${a.error?`<div class="err">${E(a.error)}</div>`:''}
-      <div class="kpis"><div class="kpi"><b>${s.sent_today||0}<small class="muted" style="font-size:12px">/${lim||'不限'}</small></b><span>今日已发</span><div class="bar"><i style="width:${pct}%"></i></div></div>
-      <div class="kpi"><b>${s.ready||0}</b><span>待发送${a.auto_send?'':'（审核）'}</span></div><div class="kpi"><b>${s.replied||0}</b><span>已回复</span></div>
-      <div class="kpi"><b>${money(s.cost_today)}</b><span>今日 AI 费用</span></div></div>
+      <div class="activity"><span class="dot ${a.paused?'':'live'}"></span>${E(a.activity||'—')} <small class="muted">${a.current_stage?'当前阶段 '+E(a.current_stage.stage)+' · '+elapsed(a.current_stage.started):'此状态已持续 '+elapsed(a.activity_since)}</small></div><div class="err account-error" title="${E(a.error||'')}">${E(a.error||'')}</div>
+      <div class="kpis"><div class="kpi"><b>${s.accepted_today||0}<small class="muted" style="font-size:12px">/${lim||'不限'}</small></b><span>今日 SMTP 接受</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+      <div class="kpi"><b>${s.ready||0}</b><span>待发送${a.auto_send?'':'（审核）'}</span></div><div class="kpi"><b>${s.replied||0}</b><span>回复记录（含自动回复待核实）</span></div>
+      <div class="kpi"><b>${s.cost_today?money(s.cost_today):'未折算'}</b><span>今日费用记录（非账单）</span></div></div>
+      <p class="hint">模式：${E(a.screening_mode||'未记录')} · ${a.auto_send?'自动发送已开启':'人工审核发送'} · 最近 SMTP 接受 ${stamp(s.last_accepted_at)}</p>
+      <div class="row" style="margin-bottom:10px;gap:6px">
+       <button class="small" onclick="filterQueue('${a.id}','unknown')">待核实发送 ${s.unknown||0}</button>
+       <button class="small" onclick="filterQueue('${a.id}','failed')">处理失败 ${s.failed||0}</button>
+       <button class="small" onclick="filterQueue('${a.id}','replied')">回复待核实 ${s.replied||0}</button>
+       <button class="small" onclick="filterQueue('${a.id}','bounced')">退信记录 ${s.bounced||0}</button>
+       <button class="small" onclick="filterQueue('${a.id}','ready')">${a.auto_send?'待发送':'待审核'} ${s.ready||0}</button>
+      </div><p class="hint"><button class="small" onclick="showCrawlRetries('${a.id}')">官网延后重试 ${s.retry_candidates||0} / 耗尽 ${s.exhausted_candidates||0}</button> · ${(s.signals||[]).map(x=>E(({fit_inference:'产品适配推测',confirmed_procurement:'明确采购证据',unclassified:'未分类'})[x.signal]||x.signal)+' '+x.n).join(' / ')}</p>
       ${mailboxBar(a)}
-      <div class="row muted" style="font-size:12px;gap:14px"><span>准备中 ${working}</span><span>候选池 ${s.candidates||0}</span><span>累计发送 ${(s.sent||0)+(s.unknown||0)+(s.replied||0)}</span><span>${Math.round((s.tokens_today||0)/1000)}k tokens 今日</span>
-      <div class="spacer"></div><button class="small" onclick="openAdd('${a.id}')">＋ 添加客户</button></div></div>`}).join('');
-  const sel=$('#facc'),cur=sel.value;sel.innerHTML='<option value="">全部账号</option>'+st.accounts.map(a=>`<option value="${a.id}">${E(a.name)}</option>`).join('');sel.value=cur;
+      <div class="row muted" style="font-size:12px;gap:14px"><span>准备中 ${working}</span><span>候选池 ${s.candidates||0}</span><span>累计 SMTP 接受 ${s.accepted_total||0}</span><span>${Math.round((s.tokens_today||0)/1000)}k tokens 今日</span>
+      <div class="spacer"></div><button class="small" onclick="openAdd('${a.id}')">＋ 添加客户</button></div></div>`}).join(''));
+  const sel=$('#facc'),cur=sel.value;if(sel!==document.activeElement){patchHTML(sel,'<option value="">全部账号</option>'+st.accounts.map(a=>`<option value="${a.id}">${E(a.name)}</option>`).join(''));sel.value=cur;}syncBusy();
 }
 
 const GB=b=>b>=1e9?(b/1073741824).toFixed(2)+' GB':Math.round((b||0)/1048576)+' MB';
@@ -193,43 +259,58 @@ function mailboxBar(a){const m=a.mailbox;if(!m||!m.limit)return '';const pct=Mat
   return `<div style="margin:-4px 0 10px;font-size:12px" class="muted">邮箱空间 ${GB(m.used)} / ${GB(m.limit)}${warn?' <b style="color:var(--bad)">快满了：设置 → 账号 → 邮箱存档</b>':''}
   <div class="bar"><i style="width:${pct}%;${warn?'background:var(--bad)':''}"></i></div></div>`}
 const fileLink=(f,label)=>`<a href="/file?path=${encodeURIComponent(f)}" ${f.endsWith('.jpg')?'target="_blank"':''}>${label}</a>`;
+let usageLoading=false;
 async function loadUsage(){
-  try{const u=await api('/api/usage?days=7');const tot=u.rows.reduce((t,r)=>({c:t.c+r.cost,i:t.i+r.input+r.output,img:t.img+r.images,calls:t.calls+r.calls}),{c:0,i:0,img:0,calls:0});
-    const pe=u.per_email||{};
-    $('#strip').innerHTML=`<div><b>${pe.tokens?Math.round(pe.tokens).toLocaleString():'—'}</b><span>每封邮件平均 tokens（7 天）</span></div>
-      <div><b>${pe.cost?money(pe.cost):'—'}</b><span>每封邮件平均成本（含生图）</span></div>
-      <div><b>${money(tot.c)}</b><span>近 7 天 AI 费用（估算）</span></div><div><b>${tot.calls}</b><span>近 7 天 AI 调用次数</span></div><div><b>${tot.img}</b><span>近 7 天效果图</span></div>`}catch(e){}
+ if(usageLoading)return;usageLoading=true;
+ try{const u=await api('/api/operations?days=7'),rows=u.usage||[],num=n=>n==null?'未记录':Number(n).toLocaleString();
+ const calls=rows.reduce((v,r)=>v+r.calls,0),imgs=rows.reduce((v,r)=>v+(r.images||0),0),tokens=rows.reduce((v,r)=>v+(r.input||0)+(r.output||0),0);
+ $('#strip').innerHTML=`<div><b>${num(calls)}</b><span>7 天调用记录</span></div><div><b>${num(tokens)}</b><span>已报告输入＋输出 token（含缓存）</span></div><div><b>${num(imgs)}</b><span>生图调用记录</span></div><div><b>订阅 / 估算分列</b><span>不把未计价当作免费</span></div>`;
+ $('#operations').innerHTML=`<p>${E(u.duration_note)} ${E(u.cost_note)}</p><div style="overflow:auto"><table><thead><tr><th>账号 / 阶段</th><th>实测次数</th><th>平均 / 最长</th><th>失败 / 中断</th></tr></thead><tbody>${(u.timing||[]).map(r=>`<tr><td>${E(r.account)} / ${E(r.stage)}</td><td>${r.measured}</td><td>${r.avg_seconds==null?'未记录':r.avg_seconds.toFixed(1)+'s'} / ${r.max_seconds==null?'未记录':r.max_seconds.toFixed(1)+'s'}</td><td>${r.failures} / ${r.interrupted}</td></tr>`).join('')||'<tr><td colspan="4">尚无升级后完成的阶段</td></tr>'}</tbody></table><table><thead><tr><th>账号 / 阶段 / 模型</th><th>调用</th><th>输入 / 输出 / 缓存 token</th><th>费用</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${E(r.account)} / ${E(r.stage)} / ${E(r.model)}</td><td>${r.calls}</td><td>${r.tokens_status==='reported'?num(r.input)+' / '+num(r.output)+' / '+num(r.cached):'未报告或零值，不能确定'}</td><td>${r.cost_status==='subscription'?'订阅调用，未折算金额':r.cost_status==='unpriced'?'未配置计价':money(r.estimated_cost)+'（估算）'}</td></tr>`).join('')}</tbody></table></div><p>回复、退信是实际记录，不等于人工确认的有效询盘；未接入成交数据，不显示成交率。</p>`;
+ }catch(e){$('#operations').textContent='用量读取失败：'+e.message+'；不能确认最新统计'}finally{usageLoading=false}
 }
 
 async function loadLeads(reset){
-  if(reset)S.offset=0;
-  const q=new URLSearchParams({status:S.status,account:$('#facc').value,q:$('#fq').value,limit:S.limit,offset:S.offset});
-  const r=await api('/api/leads?'+q);
-  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="${S.status===k?'on':''}" onclick="S.status='${k}';loadLeads(true)">${l}</button>`).join('');
-  $('#leads').innerHTML=r.items.length?r.items.map(l=>{const work=['queued','researching','writing','imaging'].includes(l.status);
-    return `<tr onclick="openLead(${l.id})" class="${S.lead===l.id?'sel':''}"><td class="co"><b>${E(l.company||l.domain)}</b><small>${E(l.account)} · ${E(l.domain)}</small></td>
-    <td class="hide-sm">${E(l.email)}</td><td class="subj" title="${E(l.subject)}">${E(l.subject)||'<span class="muted">—</span>'}</td>
-    <td><span class="st ${work?'work':l.status}">${work?'<span class="spin" style="display:inline-block;vertical-align:-2px;margin-right:4px;width:10px;height:10px"></span>':''}${ST[l.status]||l.status}</span>${l.followups?' <span class="pill">已跟进</span>':''}${l.error&&l.status==='failed'?`<div class="err" style="margin:4px 0 0">${E(l.error).slice(0,80)}</div>`:''}</td>
-    <td class="hide-sm muted">${money(l.cost)}</td><td class="muted" style="white-space:nowrap">${ago(l.reply_at||l.sent_at||l.updated_at)}</td></tr>`}).join(''):'<tr><td colspan="6" class="empty">还没有记录。点「开始」后，系统会自动寻找客户。</td></tr>';
+  if(reset){S.offset=0;S.appliedSearch=$('#fq').value}
+  const q=new URLSearchParams({status:S.status||Object.keys(ST).filter(k=>k!=='replied').join(','),account:$('#facc').value,q:S.appliedSearch||'',limit:S.limit,offset:S.offset});
+  const requestKey=q.toString(),serial=(S.listRequest||0)+1;S.listRequest=serial;
+  const r=await api('/api/leads?'+q);if(serial!==S.listRequest)return;
+  if(reset||!S.listItems||S.listQuery!==requestKey){S.listItems=r.items;S.listQuery=requestKey;S.listDirty=false}
+  else{const latest=new Map(r.items.map(x=>[x.id,x]));
+   if(r.items.map(x=>x.id).join(',')!==S.listItems.map(x=>x.id).join(','))S.listDirty=true;
+   S.listItems=S.listItems.map(x=>latest.get(x.id)||x);
+  }
+  $('#listNotice').innerHTML=S.listDirty?'<button class="small" onclick="loadLeads(true)">列表有新变化 · 点击载入</button> <span>为保留阅读位置，当前行顺序暂不移动。</span>':'列表状态实时更新；新记录会提示载入，保留阅读位置。';
+  const visibleItems=S.status?S.listItems:S.listItems.filter(l=>l.status!=='replied');
+  patchHTML($('#tabs'),TABS.map(([k,l])=>`<button class="${S.status===k?'on':''}" onclick="S.status='${k}';loadLeads(true)">${l}</button>`).join(''));
+  patchHTML($('#leads'),visibleItems.length?visibleItems.map(l=>{const work=['queued','researching','writing','imaging'].includes(l.status);
+    return `<tr data-key="lead-${l.id}" onclick="openLead(${l.id})" class="${S.lead===l.id?'sel':''}"><td class="co"><b>${E(l.company||l.domain)}</b><small>${E(l.account)} · ${E(l.email||l.domain)}</small></td>
+    <td class="mail-summary" title="${E(l.subject)}">${E(l.subject)||'<span class="muted">—</span>'}</td>
+    <td><span class="st ${work?'work':l.status}">${work?'<span class="spin" style="display:inline-block;vertical-align:-2px;margin-right:4px;width:10px;height:10px"></span>':''}${ST[l.status]||l.status}</span>${l.followups?' <span class="pill">已跟进</span>':''}${l.error&&l.status==='failed'?`<div class="err" style="margin:4px 0 0">${E(l.error).slice(0,80)}</div><button class="small" onclick="event.stopPropagation();leadAct('redo',${l.id},'research')">重新核验</button>`:''}</td>
+    <td class="muted" style="white-space:nowrap">${ago(l.reply_at||l.sent_at||l.updated_at)}</td></tr>`}).join(''):'<tr><td colspan="4" class="empty">还没有记录。点「开始」后，系统会自动寻找客户。</td></tr>');
   const pages=Math.ceil(r.total/S.limit),page=S.offset/S.limit+1;
-  $('#pager').innerHTML=pages>1?`<button class="small" ${page<=1?'disabled':''} onclick="S.offset-=S.limit;loadLeads()">上一页</button><span class="muted">${page} / ${pages}（共 ${r.total}）</span><button class="small" ${page>=pages?'disabled':''} onclick="S.offset+=S.limit;loadLeads()">下一页</button>`:`<span class="muted" style="font-size:12px">共 ${r.total} 条</span>`;
+  patchHTML($('#pager'),pages>1?`<button class="small" ${page<=1?'disabled':''} onclick="S.offset-=S.limit;loadLeads()">上一页</button><span class="muted">${page} / ${pages}（共 ${r.total}）</span><button class="small" ${page>=pages?'disabled':''} onclick="S.offset+=S.limit;loadLeads()">下一页</button>`:`<span class="muted" style="font-size:12px">共 ${r.total} 条</span>`);
 }
 
+async function showCrawlRetries(account){
+ try{const r=await api('/api/crawl-retries?account='+encodeURIComponent(account));$('#dtitle').textContent=account+' · 官网核验待办';$('#dbody').innerHTML='<p class="hint">只重试官网读取，不重试邮件。耗尽后保留待核实；不自动重置次数。</p>'+r.items.map(x=>`<p><b>${E(x.domain)}</b> · ${x.status==='retry_wait'?'延后重试':'重试耗尽'}<br>${E(x.reason)}<br>轮次 ${x.attempts}/3 · ${x.status==='retry_wait'?'最早重试 '+stamp(x.next_at):'需核实来源后再处理'}</p>`).join('');$('#drawer').classList.add('open')}catch(e){toast(e.message)}
+}
 async function openLead(id){
   S.lead=id;S.editing=false;const l=await api('/api/lead/'+id),p=(l.data||{}).prospect||{},plan=(l.data||{}).plan||{};
   $('#dtitle').innerHTML=`${E(l.company||l.domain)} <span class="st ${l.status}">${ST[l.status]||l.status}</span>`;
   const canSend=['ready','failed'].includes(l.status)&&l.subject,locked=['sent','sending','unknown','bounced','unsubscribed','replied','imaging','writing','researching'].includes(l.status);
   const facts=[['账号',l.account],['邮箱',`${E(l.email)} <span class="muted">${p.email_source&&p.email_source.startsWith('http')?`· <a href="${E(p.email_source)}" target="_blank">来源页</a>`:''}</span>`],
-    ['官网',p.website?`<a href="${E(p.website)}" target="_blank">${E(p.website)}</a>`:''],['国家',p.country],['产品',p.product_url?`<a href="${E(p.product_url)}" target="_blank">${E(p.product_name)}</a>`:E(p.product_name)],
-    ['产品信息',E([p.product_price,...(p.product_facts||[])].filter(Boolean).join(' · '))],['A 方案',E((plan.a||{}).name)],['B 方案',E((plan.b||{}).name)],
+    ['官网',(p.website||(l.data||{}).manual?.url)?`<a href="${E(p.website||(l.data||{}).manual?.url)}" target="_blank">${E(p.website||(l.data||{}).manual?.url)}</a>`:''],['国家',p.country],['产品',p.product_url?`<a href="${E(p.product_url)}" target="_blank">${E(p.product_name)}</a>`:E(p.product_name)],
+    ['产品信息',E([p.product_price,...(p.product_facts||[])].filter(Boolean).join(' · '))],['A 方案',E((plan.a||{}).name)],['B 方案',E((plan.b||{}).name)],['C 方案',E((plan.c||{}).name)],
+    ['需求分类',p.purchase_signal==='confirmed_procurement'?'明确采购证据':p.purchase_signal==='fit_inference'?'产品适配推测，不代表在采购':'未分类'],
+    ['采购证据',E((p.discovery_evidence||{}).evidence_quote||'未记录')],
     ['AI 成本',`${money(l.cost)} · ${(l.tokens||0).toLocaleString()} tokens · ${(l.usage||[]).map(u=>E(u.stage)).join(' + ')}`],['错误',l.error?`<span class="err">${E(l.error)}</span>`:'']].filter(f=>f[1]);
   const reps=(l.data||{}).replies||[],files=(l.data||{}).files||[];
   const repHtml=reps.length?reps.map(r=>`<div class="reply"><b>客户回复</b> <span class="muted">${new Date(r.at*1000).toLocaleString()}</span> · ${fileLink(r.file,'打开原邮件（含附件）')}\n${E(r.excerpt)}</div>`).join(''):(l.reply_excerpt?`<div class="reply"><b>客户回复：</b>\n${E(l.reply_excerpt)}</div>`:'');
   const fileHtml=(files.length||l.has_image)?`<div class="row" style="margin-bottom:10px;font-size:13px"><span class="muted">本地存档：</span>${files.map(f=>fileLink(f,f.includes('followup')?'跟进邮件 .eml':'当时发出的邮件 .eml')).join(' · ')}${l.has_image?`${files.length?' · ':''}<a href="/image/${id}" target="_blank">效果图大图</a>`:''}</div>`:'';
-  $('#dbody').innerHTML=`${repHtml}${fileHtml}
+  $('#dbody').innerHTML=`${l.status==='replied'?'<div class="reply"><b>回复处理待办</b><p>先查看下方回复与原邮件，区分人工回复、自动回复和有效需求，再决定如何答复。此处记录表示收到回复，尚不代表已核实或已处理；系统会阻止继续自动开发信。</p></div>':''}${l.status==='failed'?'<p class="hint">失败不代表永久不能联系。重新核验会读取官网、校正邮箱并重新准备邮件；账号运行且开启自动发送时，核验通过后继续发送。退订、退信、已回复和结果未知的邮件不可强制重发。</p>':''}${repHtml}${fileHtml}
     <div class="row" style="margin-bottom:12px">${canSend?`<button class="primary" onclick="leadAct('send',${id})">✉ 立即发送</button>`:''}
     ${!locked&&l.subject?`<button onclick="editLead(${id})">✎ 修改文字</button>`:''}${!locked&&plan.a?`<button onclick="leadAct('redo',${id},'image')">↻ 重做图片</button>`:''}
-    ${!locked?`<button onclick="leadAct('redo',${id},'all')">↻ 重写邮件+图片</button>`:''}${!['sent','sending','unknown','bounced','unsubscribed','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
+    ${!locked?`<button onclick="leadAct('redo',${id},'${l.status==='failed'?'research':'all'}')">↻ ${l.status==='failed'?'重新核验并重试':'重新生成邮件'}</button>`:''}${!['sent','sending','unknown','bounced','unsubscribed','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
     <div id="editArea"></div>${l.subject?`<iframe src="/preview/${id}?t=${Date.now()}"></iframe>`:'<div class="empty">邮件还在准备中…</div>'}<dl class="facts">${facts.map(f=>`<dt>${f[0]}</dt><dd>${f[1]}</dd>`).join('')}</dl>`;
   $('#drawer').classList.add('open');S._lead=l;loadLeads();
 }
@@ -238,7 +319,7 @@ function editLead(id){S.editing=true;const l=S._lead;$('#editArea').innerHTML=`<
 async function saveEdit(id){try{await api('/api/edit',{id,subject:$('#eSub').value,body:$('#eBody').value});toast('已保存');openLead(id)}catch(e){toast(e.message)}}
 async function leadAct(act,id,what){
   if(act==='send'&&!confirm('现在发送这封邮件？'))return;
-  try{const r=await api('/api/'+act,{id,what});toast(act==='send'?('发送结果：'+({sent:'已发送',unknown:'服务器结果未知（不会自动重发）',bounced:'退信',retry:'连接失败，稍后重试'}[r.result]||r.result)):act==='skip'?'已跳过':'已加入重做队列');openLead(id);refresh()}catch(e){toast(e.message)}
+  try{const r=await api('/api/'+act,{id,what});toast(act==='send'?('发送结果：'+({sent:'SMTP 已接受（非送达确认）',unknown:'服务器结果未知（不会自动重发）',bounced:'退信',retry:'连接失败，稍后重试'}[r.result]||r.result)):act==='skip'?'已跳过':'已加入重做队列');openLead(id);refresh()}catch(e){toast(e.message)}
 }
 
 function openAdd(acc){const st=S.state||{accounts:[]};$('#addAcc').innerHTML=st.accounts.map(a=>`<option value="${a.id}">${E(a.name)} · ${E(a.sender)}</option>`).join('');if(acc)$('#addAcc').value=acc;$('#addModal').classList.add('open');setTimeout(()=>$('#addUrls').focus(),50)}
@@ -267,7 +348,7 @@ function renderApi(){
   const cs=Object.keys(st.connections),S2=st.stages;
   const models=(k,img)=>{const pr=P[(st.connections[S2[k].connection]||{}).preset]||{};return (img?pr.image_models:pr.models)||[]};
   h+=`<fieldset style="margin-top:16px"><legend>三个阶段用什么模型</legend>
-   ${[['discover','① 找客户','每次给一批候选（默认 6 家），之后官网抓取不花 token'],['write','② 写邮件 + A/B','每个客户 1 次，产品图按 512px 低精度发送'],['image','③ 效果图','每个客户 1 张，用真实产品图做参考']].map(([k,l,d])=>`
+   ${[['discover','① 找客户','每次给一批候选（默认 6 家），之后官网抓取不花 token'],['write','② 写邮件 + 方案','每个客户 1 次，产品图按 512px 低精度发送'],['image','③ 效果图','每个客户 1 张，用真实产品图做参考']].map(([k,l,d])=>`
    <div class="stage"><div><b>${l}</b><div class="hint">${d}</div></div>
     <label class="hint">连接<select data-s="${k}" data-k="connection" onchange="collect();renderSettings()">${cs.map(c=>opt(c,c,S2[k].connection)).join('')}</select></label>
     <label class="hint">模型<input data-s="${k}" data-k="model" value="${E(S2[k].model)}" list="ml_${k}" placeholder="${(st.connections[S2[k].connection]||{}).preset==='codex'?'留空 = Codex 默认模型':''}"><datalist id="ml_${k}">${models(k,k==='image').map(m=>`<option value="${E(m)}">`).join('')}</datalist></label>
@@ -287,7 +368,7 @@ function renderAcc(){
   const st=S.settings,M=st.mail_presets,profs=st.profiles;
   let h=`<p class="hint" style="margin-top:0">每个账号独立准备和发信；发送统一检查间隔、额度及退订名单。</p>
    <div class="form" style="margin-bottom:14px"><label>所有账号合计每日上限（封，0 = 不限）<input type="number" min="0" id="totalLimit" value="${st.daily_limit_total||0}"></label>
-   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" checked disabled> GUKA/MTT 共享 7 天联系冷却；退订、拒绝、退信及未知结果继续排除</label></div>`;
+   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" checked disabled> 允许再次联系历史客户；防止同时重复发送，退订、拒绝、退信及未知结果继续排除</label></div>`;
   h+=st.accounts.map((a,i)=>`<fieldset><legend>${E(a.name||a.id||'新账号')}</legend><div class="form">
    ${ACC_FIELDS.map(([k,l])=>`<label>${l}<input data-a="${i}" data-k="${k}" value="${E(a[k]||'')}"></label>`).join('')}
    <label>邮箱服务商<select onchange="mailPreset(${i},this.value)"><option value="">自定义…</option>${Object.entries(M).map(([k,m])=>opt(k,m.label,a.smtp&&a.smtp.host===m.smtp.host?k:'')).join('')}</select></label>
@@ -399,8 +480,8 @@ async function persist(){
 async function saveSettings(){collect();try{await persist();toast('已保存');renderSettings();refresh()}catch(e){toast(e.message,5000)}}
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();closeModal('addModal');closeModal('setModal')}});
-async function tick(){await refresh();if(!S.editing)loadLeads();loadUsage()}
-tick();setInterval(refresh,3000);setInterval(()=>{if(!S.editing&&!$('#setModal').classList.contains('open'))loadLeads();loadUsage()},8000);
+async function tick(){await refresh();if(!S.editing)loadLeads().catch(e=>toast('列表读取失败：'+e.message));loadUsage()}
+tick();setInterval(refresh,3000);setInterval(()=>{if(!S.editing&&!$('#setModal').classList.contains('open'))loadLeads().catch(e=>toast('列表读取失败：'+e.message));loadUsage()},8000);
 </script>
 </body>
 </html>

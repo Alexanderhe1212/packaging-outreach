@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/scrapinghub/extruct",
+  "version": "0.18.0",
+  "tag": "v0.18.0",
+  "commit": "259dde016a5fb9e7d3061bd87def411f74edceb8",
+  "integration": "Installed pinned package in project virtual environment; local JSON-LD and Microdata extraction only. No RDFa or remote context resolution. Adapter in structured_contacts.py.",
+  "license": "BSD-3-Clause, additional bundled components described in LICENSE"
+}
