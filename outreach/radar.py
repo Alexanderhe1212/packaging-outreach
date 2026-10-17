@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 from . import config,store,web
+from .person_identity import plausible_person_name
 
 LOCK=threading.RLock()
 
@@ -32,6 +33,8 @@ def contacts():
         sources=[s for s in p.get('sources',[]) if web.root_domain(web.host(s))==web.root_domain(u.hostname)]
         if not sources or not p.get('id'):continue
         if not (p.get('name') and p.get('qualified') or p.get('contact_kind')=='company_public'):continue
+        if p.get('name') and not plausible_person_name(p['name']):
+            p=dict(p,name='',qualified=False,contact_kind='company_public')
         eligible.append(p)
     return eligible
 

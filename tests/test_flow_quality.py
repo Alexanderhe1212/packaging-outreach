@@ -7,6 +7,8 @@ class FlowQuality(unittest.TestCase):
  def test_department_not_person(self):
   self.assertFalse(pipeline.plausible_person_name('MOORCROFT HERITAGE VISITOR CENTRE'))
   self.assertEqual(pipeline.recipient_label({'verified_contact_name':'MOORCROFT HERITAGE VISITOR CENTRE','company':'Moorcroft'}),'Moorcroft team')
+ def test_shopping_heading_not_person(self):
+  self.assertFalse(pipeline.plausible_person_name('Buying Chocolates'))
  def test_company_greeting(self):
   self.assertEqual(pipeline.addressed_body('Hello,\n\nA useful idea.',{'company':'Example (Example Limited)'}),'Hi Example team,\n\nA useful idea.')
  def test_product_target_retained(self):

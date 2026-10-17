@@ -290,6 +290,7 @@ class AccountWorker(threading.Thread):
             p.pop('verified_contact_name', None)
             if contact.get('qualified') and pipeline.plausible_person_name(contact.get('name')) and str(contact.get('email','')).strip().lower() == str(p.get('email','')).strip().lower():
                 p['verified_contact_name'] = contact['name']
+                p['contact_identity_evidence'] = (contact.get('evidence_by_field') or {}).get('identity', [])
             if prof.get('require_abc') and not p.get('concept_ready'):
                 self.activity = '重新核实官网邮箱与真实产品：' + lead['company']
                 p, photo = pipeline.research(acc, p.get('website') or lead['domain'], p.get('email',''), manual=True)

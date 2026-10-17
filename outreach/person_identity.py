@@ -16,7 +16,7 @@ _NON_PERSON = re.compile(
     r'contact|contacts|customer|customers|support|services?|department|'
     r'privacy|terms|newsletter|subscribe|website|welcome|navigation|'
     r'overview|history|mission|vision|quality|sustainability|certifications?|'
-    r'visitor|centre|center|showroom|warehouse|retail|shop|gallery|catalogue|catalog|news|blog|careers?|vacancies|'
+    r'buying|shopping|ordering|delivery|shipping|opening|visit|visitor|centre|center|showroom|warehouse|retail|shop|gallery|catalogue|catalog|news|blog|careers?|vacancies|'
     r'founder|owner|director|manager|procurement|purchasing|officer|'
     r'president|chairman|ceo|sales|team|office|admin|administration|'
     r'email|phone|mobile|whatsapp|address|enquiries|inquiries)\b', re.I)
