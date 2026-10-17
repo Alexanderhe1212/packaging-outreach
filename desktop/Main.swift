@@ -3,12 +3,19 @@ import WebKit
 final class App:NSObject,NSApplicationDelegate,WKScriptMessageHandler,WKNavigationDelegate {
  var pages:[String:WKWebView]=[:];var window:NSWindow!;var web:WKWebView!;var busy=false;var polling=false;var ready=false
  let root=NSHomeDirectory()+"/Library/Application Support/UserRadar/desktop/"
+ func configuration()->WKWebViewConfiguration {
+  let config=WKWebViewConfiguration()
+  let language=UserDefaults.standard.string(forKey:"uiLanguage")=="zh" ? "zh" : "en"
+  let script=(try? String(contentsOfFile:root+"i18n.js",encoding:.utf8)) ?? ""
+  config.userContentController.addUserScript(WKUserScript(source:"window.__radarLang='"+language+"';"+script,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
+  return config
+ }
  func applicationDidFinishLaunching(_ notification:Notification){
-  let config=WKWebViewConfiguration();config.userContentController.add(self,name:"desktop")
+  let config=configuration();config.userContentController.add(self,name:"desktop")
   web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self
   window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:800),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-  window.title="User Radar · 客户开发工作台";window.minSize=NSSize(width:1000,height:650);window.contentView=web
-  let menu=NSMenu();let item=NSMenuItem();menu.addItem(item);let sub=NSMenu();item.submenu=sub;sub.addItem(withTitle:"退出工作台（后台继续）",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q");NSApp.mainMenu=menu
+  window.title="User Radar — Outreach Workspace";window.minSize=NSSize(width:1000,height:650);window.contentView=web
+  let menu=NSMenu();let item=NSMenuItem();menu.addItem(item);let sub=NSMenu();item.submenu=sub;sub.addItem(withTitle:"Quit User Radar (background continues)",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q");NSApp.mainMenu=menu
   window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
   web.loadFileURL(URL(fileURLWithPath:root+"dashboard.html"),allowingReadAccessTo:URL(fileURLWithPath:root))
  }
@@ -16,17 +23,23 @@ final class App:NSObject,NSApplicationDelegate,WKScriptMessageHandler,WKNavigati
  func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage){
   // Only our local top-level dashboard can control the real accounts.
   guard message.webView === web,message.frameInfo.isMainFrame,web.url?.standardizedFileURL==URL(fileURLWithPath:root+"dashboard.html").standardizedFileURL,let action=message.body as? String else{return}
+  if action.hasPrefix("language:") {
+   let language=action=="language:zh" ? "zh" : "en"
+   UserDefaults.standard.set(language,forKey:"uiLanguage")
+   for page in [web!] + Array(pages.values) {page.evaluateJavaScript("window.UserRadarI18n?.setLanguage('"+language+"')",completionHandler:nil)}
+   return
+  }
   if action.hasPrefix("tab:"){showTab(String(action.dropFirst(4)));return}
   guard ["snapshot","start","pause","boot"].contains(action) else{return}
   run(action)
  }
  func showTab(_ tab:String){
-  
+
   for p in pages.values {p.isHidden=true}
   let urls=["problems":"http://127.0.0.1:18800/problems","replies":"http://127.0.0.1:18800/?status=replied","customers":"http://127.0.0.1:18800/radar","mail":"http://127.0.0.1:18800/?view=compact","search":"http://127.0.0.1:18830/"]
   guard let url=urls[tab] else{return}
   if let p=pages[tab]{p.isHidden=false;return}
-  let p=WKWebView();p.navigationDelegate=self;p.translatesAutoresizingMaskIntoConstraints=false;web.addSubview(p)
+  let p=WKWebView(frame:.zero,configuration:configuration());p.navigationDelegate=self;p.translatesAutoresizingMaskIntoConstraints=false;web.addSubview(p)
   NSLayoutConstraint.activate([p.leadingAnchor.constraint(equalTo:web.leadingAnchor,constant:206),p.trailingAnchor.constraint(equalTo:web.trailingAnchor),p.topAnchor.constraint(equalTo:web.topAnchor,constant:83),p.bottomAnchor.constraint(equalTo:web.bottomAnchor)])
   pages[tab]=p;p.load(URLRequest(url:URL(string:url)!))
  }
