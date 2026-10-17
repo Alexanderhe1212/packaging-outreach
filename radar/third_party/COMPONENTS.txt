@@ -1,0 +1,33 @@
+User Radar public-source components (local integration)
+
+1. extruct 0.18.0
+Upstream: https://github.com/scrapinghub/extruct
+License: BSD-3-Clause; retained upstream LICENSE and provenance under extruct/.
+Integration: JSON-LD and Microdata Person extraction in structured_contacts.py.
+Only local parsing is enabled. No remote RDFa/context retrieval.
+Name, role, individual email, mobile and explicit WhatsApp remain separately verified.
+
+2. theHarvester 4.8.2 email parser
+Upstream: https://github.com/laramies/theHarvester
+Commit: b9eeef90cb5ae960abf8ccae874bba6673c1c688
+License: GPL-2.0; retained text and source provenance under theHarvester/.
+Scope: unchanged parsers/myparser.py, executed via standalone email_worker.py.
+Input: public documents already independently read by User Radar.
+Output: domain email hints, always initially unqualified.
+The adapter filters suffix-domain false positives and requires original same-person
+name+role+email evidence before qualification. The full network-engine suite,
+DNS recon, scans and paid API sources are not installed or enabled.
+No person is inferred from an email local part. No WhatsApp inferred from phone.
+
+Runtime license text: see component LICENSE files and installed package metadata.
+
+3. website-email-contact-scraper local email parser
+Upstream: https://github.com/omkarcloud/website-email-contact-scraper
+Commit: d6a92b92f08a9740535de5f2dd6c6fb27ad7a0d8
+License: MIT; retained LICENSE, unmodified parsing modules and hashes under
+website_email_contact_scraper/. No upstream crawler, aggregate ranking,
+Chrome installer, network API or package install scripts are used.
+Adapter website_email_bridge.py decodes explicit public email spellings within
+the original DOM scope and retains original spellings/method. All upstream
+page email outputs are unqualified leads, still independently verified.
+No mobile or WhatsApp behavior or company contact ranking is imported.

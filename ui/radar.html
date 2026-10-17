@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>用户雷达客户 · OutreachPilot</title>
+<style>body{font:16px system-ui;background:#f4f7fa;color:#203044;max-width:1100px;margin:32px auto;padding:20px}section{background:white;padding:22px;margin:18px 0;border-radius:12px}button,select{font:inherit;padding:10px;border:1px solid #bbc8d6;border-radius:8px;background:white;margin:4px}button{cursor:pointer}button:disabled{opacity:.5}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;word-break:break-word}a{color:#185bc1}.hint{color:#66788b}#notice{white-space:pre-wrap}</style>
+<a href="/">← 返回 OutreachPilot</a><h1>用户雷达客户</h1>
+<p>雷达查找并保存 → 导入待开发 → 官网复核、包装方案和图片 → 按现有规则发信。</p>
+<section><label>开发账号 <select id="account"><option value="">请选择账号</option></select></label><button id="refresh">刷新雷达客户</button><a href="http://127.0.0.1:18830/" target="_blank" rel="noopener">打开用户雷达</a><p id="notice" role="status"></p>
+<p class="hint">每家公司默认选一条，优先具名联系人。公共邮箱明确标注。导入后先待开发，不会仅因导入而发信。</p>
+<button id="select-all">全选</button><button id="select-none">取消全选</button><span id="selection" class="hint"></span><p><button id="one-step" style="background:#185bc1;color:white">一键开始开发（含后续自动领取）</button></p><p class="hint">将勾选公司交给所选账号：导入 → 启动开发 → 自动领取后续雷达客户。按原规则复核后可能自动发信；其他账号不启动。</p><details><summary>仅导入，不启动开发</summary><button id="import">将勾选客户导入待开发</button></details><div id="contacts"></div></section>
+<section><h2>已导入 OutreachPilot</h2><p>点击开始开发后，这批客户进入所选账号的现有流程；账号启用自动发送时，合格邮件会按原有规则发送。</p><button id="release">开始开发该账号的待开发客户</button><div id="imported"></div></section>
+<section><h2>后续客户来源</h2><p>启用后，所选账号在当前队列处理完后，逐家领取雷达已保存的新公司。雷达没有新客户时等待，不再调用原来的自动找客流程。另一账号保持原设置。</p><button id="enable">启用雷达作为该账号的客户来源</button><button id="disable">恢复原客户来源</button><p id="setting"></p><p id="auto-status" role="status"></p></section>
+<script>
+'use strict';const $=id=>document.getElementById(id);let snapshot={};
+const cell=(tag,text)=>{const e=document.createElement(tag);e.textContent=text||'';return e};
+async function api(path,data){const r=await fetch(path,data?{method:'POST',headers:{'Content-Type':'application/json','X-Outreach-Source':'ui'},body:JSON.stringify(data)}:{});const v=await r.json();if(!r.ok||v.error)throw Error(v.error||'连接失败');return v}
+function account(){if(!$('account').value)throw Error('请先选择 GUKA 或 MTT 账号');return $('account').value}
+async function load(){snapshot=await api('/api/radar');const previous=$('account').value;$('account').replaceChildren(cell('option','请选择账号'));$('account').firstChild.value='';for(const a of snapshot.accounts){const o=cell('option',a.name);o.value=a.id;$('account').append(o)}$('account').value=previous||snapshot.automatic.account||'';
+ const table=document.createElement('table');const head=document.createElement('tr');for(const t of ['选择','公司 / 联系人','邮箱','类型'])head.append(cell('th',t));table.append(head);const seen=new Set();
+ const rows=[...snapshot.contacts].sort((a,b)=>Number(!!b.name)-Number(!!a.name));for(const p of rows){const tr=document.createElement('tr'),td=document.createElement('td'),input=document.createElement('input');input.type='checkbox';input.value=p.id;const host=new URL(p.website).hostname.replace(/^www\./,'');input.checked=!seen.has(host);input.dataset.domain=host;input.onchange=selection;seen.add(host);td.append(input);tr.append(td,cell('td',(p.company||host)+(p.name?' · '+p.name:'')),cell('td',p.email),cell('td',p.name?'具名联系人':'公司公共邮箱'));table.append(tr)}$('contacts').replaceChildren(table);selection();
+ const list=document.createElement('table');for(const p of snapshot.imported){const tr=document.createElement('tr');tr.append(cell('td',p.account),cell('td',p.domain),cell('td',p.email),cell('td',({radar_review:'待开发',queued:'排队中',sent:'SMTP 已接受'})[p.status]||p.status));list.append(tr)}$('imported').replaceChildren(list);$('setting').textContent=snapshot.automatic.enabled?'已启用：'+(snapshot.automatic.mode==='shared_random'?'GUKA / MTT 共享随机分配':snapshot.automatic.account):'尚未启用自动领取';$('auto-status').textContent=(snapshot.discovery||{}).stage||'自动查找尚未启动';}
+function selection(){const checked=[...$('contacts').querySelectorAll('input:checked')];$('selection').textContent='已选 '+checked.length+' 条 / '+new Set(checked.map(e=>e.dataset.domain)).size+' 家公司';}
+function bind(id,fn){$(id).onclick=async()=>{$(id).disabled=true;try{await fn()}catch(e){$('notice').textContent=e.message}finally{$(id).disabled=false}}}
+bind('select-all',()=>{for(const e of $('contacts').querySelectorAll('input'))e.checked=true;selection()});
+bind('select-none',()=>{for(const e of $('contacts').querySelectorAll('input'))e.checked=false;selection()});
+bind('one-step',async()=>{
+ const aid=account(),chosen=[...$('contacts').querySelectorAll('input:checked')],contact_ids=chosen.map(e=>e.value),domains=new Set(chosen.map(e=>e.dataset.domain));
+ if(!contact_ids.length)throw Error('请先勾选客户，或点击全选');
+ const buttons=[...document.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);$('account').disabled=true;
+ let stage='导入客户';
+ try{
+  $('notice').textContent='正在导入并准备启动…';
+  const imported=await api('/api/radar/import',{account:aid,contact_ids});
+  const latest=await api('/api/radar');
+  const ids=latest.imported.filter(p=>p.account===aid&&p.status==='radar_review'&&domains.has(p.domain.replace(/^www\./,''))).map(p=>p.id);
+  stage='启用后续雷达客户来源';await api('/api/radar/configure',{account:aid,enabled:true});
+  stage='将客户加入开发队列';const released=ids.length?await api('/api/radar/release',{account:aid,ids}):{ids:[]};
+  stage='启动所选账号';await api('/api/start',{account:aid});
+  await load();$('notice').textContent=aid+' 已开始开发，新增排队 '+released.ids.length+' 家；后续雷达客户将逐家自动领取。重复、近期已联系及受保护客户不会重复加入。发送结果以主界面为准。';
+ }catch(e){throw Error(stage+'未完成：'+e.message+'。已完成的步骤会保留，请刷新查看；不要把此提示视为已发信。')}
+ finally{buttons.forEach(b=>b.disabled=false);$('account').disabled=false}
+});
+bind('refresh',load);bind('import',async()=>{const ids=[...$('contacts').querySelectorAll('input:checked')].map(e=>e.value);const v=await api('/api/radar/import',{account:account(),contact_ids:ids});await load();$('notice').textContent='导入 '+v.ids.length+' 家待开发；跳过 '+v.skipped.length+' 条重复或受保护记录。尚未启动发信。'});
+bind('release',async()=>{const aid=account(),ids=snapshot.imported.filter(p=>p.account===aid&&p.status==='radar_review').map(p=>p.id);if(!ids.length)throw Error('该账号没有待开发客户');const v=await api('/api/radar/release',{account:aid,ids});if(v.ids.length)await api('/api/start',{account:aid});await load();$('notice').textContent='已将 '+v.ids.length+' 家加入开发队列，发送结果请在主界面查看。'});
+bind('enable',async()=>{await api('/api/radar/configure',{account:account(),enabled:true});await load();$('notice').textContent='已启用后续自动领取；暂停账号仍保持暂停。'});
+bind('disable',async()=>{await api('/api/radar/configure',{account:account(),enabled:false});await load()});load().catch(e=>$('notice').textContent=e.message);
+</script></html>

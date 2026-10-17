@@ -1,0 +1,21 @@
+{
+  "installed_on": "2026-10-17",
+  "sources": [
+    {
+      "skill": "cold-email",
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/cold-email",
+      "sha256": "963540924147c3b74b7693bbc292ac2da3d407807c270f8a3123bd3432fdc337"
+    },
+    {
+      "skill": "copy-editing",
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/copy-editing",
+      "sha256": "2a072606d9d5662509ea6ef62c65719487dcb68876acab9286bde4d1af5c030f"
+    },
+    {
+      "skill": "email-copywriting",
+      "url": "https://github.com/Ken-Technology/cold-email-skills/tree/main/email-copywriting",
+      "sha256": "c1e97f3362ae5bf0ecad21cb30874a6bd8dc48a4be7260cf3b7d2c09157ba6fc"
+    }
+  ],
+  "integration": "Locally adapted editorial principles applied in the existing generation call; no extra model call. User-approved behavior takes precedence."
+}

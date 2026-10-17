@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS audit(
  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, event TEXT, account TEXT, lead INTEGER,
  source TEXT, request_id TEXT, peer TEXT, result TEXT);
 CREATE TABLE IF NOT EXISTS identity_claims(key TEXT PRIMARY KEY, lead INTEGER);
+CREATE TABLE IF NOT EXISTS stage_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, lead INTEGER,
+ stage TEXT, started REAL, finished REAL, duration REAL, outcome TEXT, error_type TEXT);
+CREATE INDEX IF NOT EXISTS stage_runs_account ON stage_runs(account,started);
+CREATE TABLE IF NOT EXISTS crawl_retries(domain TEXT PRIMARY KEY, attempts INTEGER DEFAULT 0, next_at REAL, reason TEXT);
 
 '''
 ACTIVE = ('queued', 'researching', 'writing', 'imaging')
@@ -56,6 +60,9 @@ def db():
             _conn.row_factory = sqlite3.Row
             _conn.execute('PRAGMA journal_mode=WAL')
             _conn.executescript(SCHEMA)
+            columns = {r[1] for r in _conn.execute('PRAGMA table_info(usage)')}
+            if 'run_id' not in columns:
+                _conn.execute('ALTER TABLE usage ADD COLUMN run_id INTEGER')
             _conn.commit()
         return _conn
 
@@ -117,11 +124,14 @@ def update(lid, **f):
     f['updated_at'] = time.time()
     keys = list(f)
     x('UPDATE leads SET ' + ','.join(k + '=?' for k in keys) + ' WHERE id=?', [f[k] for k in keys] + [lid])
+    if f.get('status') in ('failed', 'unknown'):
+        from . import problems
+        problems.overview()
 
 
 def next_lead(account, statuses):
     marks = ','.join('?' for _ in statuses)
-    r = q('SELECT id FROM leads WHERE account=? AND status IN (' + marks + ') ORDER BY id LIMIT 1', [account] + list(statuses), one=True)
+    r = q("SELECT id FROM leads WHERE account=? AND status IN (" + marks + ") AND (status != 'queued' OR COALESCE(json_extract(data, '$.research_retry_at'), 0) <= ?) ORDER BY id LIMIT 1", [account] + list(statuses) + [time.time()], one=True)
     return lead(r['id']) if r else None
 
 
@@ -163,6 +173,7 @@ def reset_interrupted():
         x("UPDATE send_attempts SET result='unknown',finished=? WHERE result='sending'", (time.time(),))
         x("UPDATE leads SET status='queued' WHERE status IN ('researching','writing','imaging')")
         x("UPDATE candidates SET status='new' WHERE status='researching'")
+        x("UPDATE stage_runs SET outcome='interrupted',finished=? WHERE outcome='running'", (time.time(),))
 
 
 # ---------- candidates (cheap list of domains to crawl) ----------
@@ -183,7 +194,7 @@ def add_candidates(account, items):
             inserted=cur.rowcount
             if not inserted:
                 existing=c.execute('SELECT status FROM candidates WHERE domain=?',(d,)).fetchone()
-                if existing and existing['status'] not in ('new','researching'):
+                if existing and existing['status'] not in ('new','researching','retry_wait','retry_exhausted'):
                     c.execute('UPDATE candidates SET account=?,brand=?,note=?,created_at=?,status=?,reason=? WHERE domain=?',
                         (account,str(item.get('brand',''))[:120],json.dumps({k:str(item.get(k,''))[:1500] for k in fields},ensure_ascii=False),time.time(),state,'refreshed source after eligibility check',d))
                     inserted=1
@@ -201,6 +212,7 @@ def claim_candidate(account):
         c = db()
         c.execute('BEGIN IMMEDIATE')
         try:
+            c.execute("UPDATE candidates SET status='new' WHERE account=? AND status='retry_wait' AND domain IN (SELECT domain FROM crawl_retries WHERE next_at<=?)", (account,time.time()))
             r = c.execute("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY created_at LIMIT 1", (account,)).fetchone()
             if r:
                 c.execute("UPDATE candidates SET status='researching' WHERE domain=?", (r['domain'],))
@@ -216,6 +228,8 @@ def mark_candidate(domain, status, reason=''):
 
 
 def recent_candidate_domains(account, limit=40):
+    if COOLDOWN_SECONDS <= 0:
+        return []
     return [r['domain'] for r in q('SELECT domain FROM candidates WHERE created_at>? ORDER BY created_at DESC LIMIT ?', (time.time()-COOLDOWN_SECONDS, limit))]
 
 
@@ -225,7 +239,8 @@ def suppress(value, kind, account='', note=''):
         x('INSERT OR REPLACE INTO suppress VALUES(?,?,?,?,?)', (value.lower(), kind, account, note[:300], time.time()))
 
 
-COOLDOWN_SECONDS = 7 * 24 * 60 * 60
+COOLDOWN_SECONDS = 0  # Keep automatic recycling of sent records disabled.
+CONTACT_COOLDOWN_SECONDS = 7 * 24 * 60 * 60  # Sending safety spans every account.
 
 
 def shared():
@@ -284,8 +299,9 @@ def estimate_cost(model, inp, out, cached=0, images=0, searches=0, quality=''):
 def add_usage(account, stage, model, inp=0, out=0, cached=0, images=0, searches=0, quality=''):
     lid = getattr(_current_lead, 'id', None)
     cost = estimate_cost(model, inp, out, cached, images, searches, quality)
-    x('INSERT INTO usage(ts,day,account,lead,stage,model,input,output,cached,images,searches,cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+    usage_id = x('INSERT INTO usage(ts,day,account,lead,stage,model,input,output,cached,images,searches,cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
       (time.time(), today(), account, lid, stage, model, inp, out, cached, images, searches, cost))
+    x('UPDATE usage SET run_id=? WHERE id=?', (getattr(_current_lead, 'run_id', None), usage_id))
     if lid:
         x('UPDATE leads SET cost=cost+?, tokens=tokens+? WHERE id=?', (cost, inp + out, lid))
 
@@ -302,7 +318,8 @@ def usage_summary(days=7):
 def stats(account):
     rows = q('SELECT status,count(*) n FROM leads WHERE account=? GROUP BY status', (account,))
     s = {r['status']: r['n'] for r in rows}
-    s['sent_today'] = sent_today(account)
+    s['sent_today'] = sent_today(account)  # quota semantics unchanged
+    s.update(delivery_stats(account))
     s['candidates'] = q("SELECT count(*) n FROM candidates WHERE account=? AND status='new'", (account,), one=True)['n']
     c = q('SELECT sum(cost) c, sum(input+output) t FROM usage WHERE account=? AND day=?', (account, today()), one=True)
     s['cost_today'] = round(c['c'] or 0, 3)
@@ -369,7 +386,7 @@ def _record_hold(c, row, now):
     if c.execute("SELECT 1 FROM send_attempts WHERE lead=? AND result='unknown' LIMIT 1", (row['id'],)).fetchone():
         return 'unknown'
     contacted = last_contact(c,row)
-    if contacted and now - contacted < COOLDOWN_SECONDS:
+    if contacted and now - contacted < CONTACT_COOLDOWN_SECONDS:
         return 'cooldown'
     if row.get('status') == 'sent' and not contacted:
         return 'history_time_unknown'
@@ -389,7 +406,7 @@ def _conflict(c, row, preparation=False):
     if own:
         reason=_record_hold(c,own,now)
         if reason:return reason
-    active=set(ACTIVE) | {'ready','sending'}
+    active=set(ACTIVE) | {'ready','sending','radar_review'}
     for other in c.execute('SELECT * FROM leads WHERE id<>?', (row['id'],)):
         if not (identity_keys(other['email'],other['domain'],other['company']) & keys):continue
         reason=_record_hold(c,other,now)
@@ -409,6 +426,10 @@ def _conflict(c, row, preparation=False):
 
 def queue_recontact(account):
     """Create one fresh draft from verified facts; never rewrite sent history or reuse its email."""
+    # With no contact cooldown, auto-recycling sent rows would produce an endless
+    # immediate resend loop. Recontact instead enters via discovery/manual import.
+    if COOLDOWN_SECONDS <= 0:
+        return None
     import copy
     with _lock:
         c=db();c.execute('BEGIN IMMEDIATE')
@@ -439,7 +460,7 @@ def queue_recontact(account):
             c.rollback();raise
 
 
-def claim_prospect(account, prospect, source='auto', lid=None, manual=None):
+def claim_prospect(account, prospect, source='auto', lid=None, manual=None, hold=False):
     """Atomic brand/email/domain ownership after research, including redirects/aliases."""
     with _lock:
         c = db(); c.execute('BEGIN IMMEDIATE')
@@ -452,7 +473,7 @@ def claim_prospect(account, prospect, source='auto', lid=None, manual=None):
             if lid is None:
                 data={'prospect':prospect} if not manual else {'manual':manual}
                 cur=c.execute('INSERT INTO leads(account,status,source,company,domain,email,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
-                    (account,'queued' if manual else 'writing',source,row['company'],row['domain'].lower(),row['email'].lower(),json.dumps(data,ensure_ascii=False),now,now))
+                    (account,'radar_review' if hold else ('queued' if manual else 'writing'),source,row['company'],row['domain'].lower(),row['email'].lower(),json.dumps(data,ensure_ascii=False),now,now))
                 lid=cur.lastrowid
             for key in identity_keys(row['email'],row['domain'],row['company']):
                 c.execute('INSERT OR REPLACE INTO identity_claims VALUES(?,?)',(key,lid))
@@ -546,3 +567,46 @@ def finish_send(token,result,note,next_at):
             c.commit()
         except Exception:
             c.rollback();raise
+
+
+def defer_candidate(domain, error):
+    """At most three deferred rounds; fresh discovery cannot reset this budget."""
+    from . import web
+    with _lock:
+        prev = q('SELECT attempts FROM crawl_retries WHERE domain=?', (domain,), one=True)
+        cause = web.transient_failure(error)
+        tries = (prev['attempts'] if prev else 0) + (0 if isinstance(cause, web.DeferredFetch) else 1)
+        delay = (max(1, web.retry_after(cause)) if isinstance(cause, web.DeferredFetch) else
+                 max(min(300 * 2 ** max(0, tries-1), 3600) * (1 + __import__('random').uniform(0, .25)), web.retry_after(cause)))
+        exhausted = tries >= 3
+        reason = '临时官网错误：%s；%s' % (web.web_error_label(cause), '重试额度耗尽，需人工核实' if exhausted else '延后第 %d/3 轮重试' % tries)
+        x('INSERT OR REPLACE INTO crawl_retries VALUES(?,?,?,?)', (domain, tries, time.time()+delay, reason))
+        mark_candidate(domain, 'retry_exhausted' if exhausted else 'retry_wait', reason)
+
+
+def delivery_stats(account):
+    """Transport acceptance is based on attempts, never lead state or imported sent_at."""
+    start = day_start()
+    r = q("SELECT count(*) total, sum(CASE WHEN finished>=? THEN 1 ELSE 0 END) today, max(finished) last FROM send_attempts WHERE account=? AND result='sent'", (start,account), one=True)
+    result = dict(accepted_total=r['total'], accepted_today=r['today'] or 0, last_accepted_at=r['last'])
+    for state in ('unknown','retry','bounced','auth_error'):
+        result[state+'_attempts_today'] = q('SELECT count(*) n FROM send_attempts WHERE account=? AND result=? AND started>=?', (account,state,start), one=True)['n']
+    result['retry_candidates'] = q("SELECT count(*) n FROM candidates WHERE account=? AND status='retry_wait'", (account,), one=True)['n']
+    result['exhausted_candidates'] = q("SELECT count(*) n FROM candidates WHERE account=? AND status='retry_exhausted'", (account,), one=True)['n']
+    # Classification is descriptive only; no change to eligibility or sending policy.
+    result['signals'] = q("SELECT CASE WHEN json_extract(data,'$.prospect.purchase_signal')='confirmed_procurement' THEN 'confirmed_procurement' WHEN json_extract(data,'$.prospect.purchase_signal')='fit_inference' THEN 'fit_inference' ELSE 'unclassified' END signal,count(*) n FROM leads WHERE account=? GROUP BY signal", (account,))
+    return result
+
+
+def operation_report(days=7):
+    since = time.time()-max(1,min(days,90))*86400
+    timing = q("SELECT account,stage,count(*) runs,sum(CASE WHEN outcome='failed' THEN 1 ELSE 0 END) failures,sum(CASE WHEN outcome='interrupted' THEN 1 ELSE 0 END) interrupted,count(duration) measured,avg(duration) avg_seconds,max(duration) max_seconds FROM stage_runs WHERE started>=? AND outcome!='running' GROUP BY account,stage", (since,))
+    usage = q('SELECT account,stage,model,count(*) calls,sum(input) input,sum(output) output,sum(cached) cached,sum(images) images,sum(cost) recorded_cost FROM usage WHERE ts>=? GROUP BY account,stage,model', (since,))
+    prices = config.load().get('pricing_usd_per_million', {})
+    for row in usage:
+        model = row['model'] or ''
+        row['cost_status'] = 'subscription' if model.startswith('codex:') else ('estimated' if model.split('/')[-1] in prices else 'unpriced')
+        row['estimated_cost'] = row['recorded_cost'] if row['cost_status']=='estimated' else None
+        row['tokens_status'] = 'reported' if (row['input'] or row['output']) else 'not_reported_or_zero'
+        row.pop('recorded_cost',None)
+    return dict(days=days,timing=timing,usage=usage,as_of=time.time(),duration_note='耗时仅包含升级后的实测记录；历史未记录，不补算。',cost_note='订阅调用未折算金额；估算不等于账单。')

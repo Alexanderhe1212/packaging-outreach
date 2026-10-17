@@ -1,0 +1,11 @@
+{
+  "upstream": "https://github.com/omkarcloud/website-email-contact-scraper",
+  "commit": "d6a92b92f08a9740535de5f2dd6c6fb27ad7a0d8",
+  "license": "MIT",
+  "scope": "Unmodified local email parsing modules only; no crawler, browser, hosted API, ranking or dependencies installed",
+  "files": {
+    "extract_emails.py": "a6b8cda74708ec9fdcc13b2fc564e2987d489a623005ba2729ecd2ab7eb6fd45",
+    "html_text.py": "14836bb46a3bb0da5453504c90f9d0c828ef34c6f7ec27c987e5f1d09a020356",
+    "social_regexes.py": "e6cfa6c4e44226fe0b669fc8816cc826f5489f4f8a6dbb8a1b846ffba88f59b4"
+  }
+}

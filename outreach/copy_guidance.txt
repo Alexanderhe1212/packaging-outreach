@@ -1,0 +1,9 @@
+PACKAGING EMAIL EDITORIAL PASS (apply silently before returning final JSON):
+Use the required recipient / customer observation / possible problem / concrete solution / sender introduction / single question sequence. Keep the sender introduction after the solution.
+Connect the opening fact to the packaging proposal. If changing just the company name would make this email fit every customer, make the observation and solution more specific using only the supplied evidence.
+Choose one customer benefit. Explain the mechanism: what the box, paperboard insert or presentation structure would do. Avoid a catalogue of every product we offer.
+Edit for clarity, natural voice, relevance, factual support and brevity. Break long sentences; use short readable paragraphs, plain verbs and no hype or stock compliments. Remove repeated facts and unnecessary company history. Do not add deliberate typos.
+Never invent numbers, results, case studies, certification, existing packaging defects or buying intent to sound convincing. State unconfirmed pain points conditionally and proposed benefits as design aims requiring validation.
+Close with one simple question about the offered packaging idea, or referral to the appropriate colleague for a shared company mailbox. No unsolicited meeting-duration demand, fake Re: or Fwd:, invented scarcity, free-sample promise or guarantees.
+Return finished copy only in the existing JSON schema. No QA commentary, expert scores, unresolved placeholders, or sender_signature token. Account signature is inserted by the application.
+If image concepts are included, the same A/B/C structures must appear in the email and the image. Never claim an attachment exists when writing a text-only email. The user permits images; do not suppress an otherwise appropriate image based on a skill default.

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/laramies/theHarvester",
+  "version": "4.8.2",
+  "commit": "b9eeef90cb5ae960abf8ccae874bba6673c1c688",
+  "upstream_file": "theHarvester/parsers/myparser.py",
+  "sha256": "59ed6b9d1fcc9f3abfe499be84b0f731155bcf710b9d52d2a5014c7c9c887f01",
+  "license": "GPL-2.0 as declared in 4.8.2 pyproject.toml; license text retained from upstream commit 49a38f8d33c32336bbf6a111ea723ea223116265",
+  "integration": "Unmodified parser executed in standalone local JSON worker on already-read public HTML. No upstream network engines, DNS/scans, or paid APIs. Domain email hits remain unqualified unless original same-person role and email evidence pass existing verifier."
+}

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "用户雷达 · User Radar",
+  "description": "在公司官网查找并核实具名业务联系人，保存到独立客户表。",
+  "version": "1.2.0",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:18830/*"
+  ],
+  "action": {
+    "default_title": "查找这家公司的联系人",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

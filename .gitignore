@@ -19,3 +19,15 @@ settings.json
 secrets.json
 *.jpg
 !ui/*.jpg
+
+# User Radar local state and credentials
+node_modules/
+research-runs/
+benchmark*/
+*.db-*
+*.sqlite*
+*.log
+extension-pairing.json
+radar/chrome-extension/config.js
+*.app/
+.DS_Store
