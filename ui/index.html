@@ -164,12 +164,12 @@ main{max-width:1120px}.lead-table{table-layout:fixed;font-size:13px}.lead-table 
 <div class="toast" id="toast"></div>
 
 <script>
-const viewParams=new URLSearchParams(location.search);document.body.classList.toggle('compact-view',viewParams.get('view')==='compact'||viewParams.get('status')==='replied');document.body.classList.toggle('reply-view',viewParams.get('status')==='replied');
+const viewParams=new URLSearchParams(location.search);if(['writing','images'].includes(viewParams.get('stage'))){const style=document.createElement('style');style.textContent='#tabs{display:none}';document.head.append(style);}document.body.classList.toggle('compact-view',viewParams.get('view')==='compact'||viewParams.get('status')==='replied');document.body.classList.toggle('reply-view',viewParams.get('status')==='replied');
 
 const $=s=>document.querySelector(s), E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ST={queued:'排队中',researching:'读官网',writing:'写邮件',imaging:'生成图',ready:'待发送',sent:'SMTP 已接受',unknown:'待核实发送',sending:'发送中',backlog:'后备待核实',replied:'已回复',failed:'失败',skipped:'已跳过',bounced:'退信',unsubscribed:'退订'};
 const TABS=[['','开发记录'],['queued,researching,writing,imaging','准备中'],['ready','待发送'],['sent','SMTP 已接受'],['unknown','待核实发送'],['backlog','后备'],['replied','回复'],['failed,skipped,bounced,unsubscribed','失败/退订']];
-let S={state:null,status:new URLSearchParams(location.search).get('status')==='replied'?'replied':'',offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
+let S={state:null,status:(viewParams.get('status')||'').split(',').filter(x=>Object.hasOwnProperty.call(ST,x)).join(','),offset:0,limit:60,lead:null,settings:null,stab:'api',editing:false};
 // Preserve node identity, focus and scroll during background polling.
 function nodeKey(n){return n.nodeType===1?(n.getAttribute('data-key')||n.id||''):''}
 function patchNode(old,fresh){

@@ -36,7 +36,7 @@ final class App:NSObject,NSApplicationDelegate,WKScriptMessageHandler,WKNavigati
  func showTab(_ tab:String){
 
   for p in pages.values {p.isHidden=true}
-  let urls=["problems":"http://127.0.0.1:18800/problems","replies":"http://127.0.0.1:18800/?status=replied","customers":"http://127.0.0.1:18800/radar","mail":"http://127.0.0.1:18800/?view=compact","search":"http://127.0.0.1:18830/"]
+  let urls=["writing":"http://127.0.0.1:18800/?view=compact&stage=writing&status=queued,researching,writing,ready","images":"http://127.0.0.1:18800/?view=compact&stage=images&status=imaging,ready","problems":"http://127.0.0.1:18800/problems","replies":"http://127.0.0.1:18800/?status=replied","customers":"http://127.0.0.1:18800/radar","mail":"http://127.0.0.1:18800/?view=compact","search":"http://127.0.0.1:18830/"]
   guard let url=urls[tab] else{return}
   if let p=pages[tab]{p.isHidden=false;return}
   let p=WKWebView(frame:.zero,configuration:configuration());p.navigationDelegate=self;p.translatesAutoresizingMaskIntoConstraints=false;web.addSubview(p)

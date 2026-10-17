@@ -287,7 +287,8 @@ class AccountWorker(threading.Thread):
             contact = (d.get('manual') or {}).get('radar') or {}
             if contact.get('company'):
                 p['recipient_company'] = contact['company']
-            if contact.get('qualified') and contact.get('name') and str(contact.get('email','')).strip().lower() == str(p.get('email','')).strip().lower():
+            p.pop('verified_contact_name', None)
+            if contact.get('qualified') and pipeline.plausible_person_name(contact.get('name')) and str(contact.get('email','')).strip().lower() == str(p.get('email','')).strip().lower():
                 p['verified_contact_name'] = contact['name']
             if prof.get('require_abc') and not p.get('concept_ready'):
                 self.activity = '重新核实官网邮箱与真实产品：' + lead['company']
@@ -347,6 +348,8 @@ class AccountWorker(threading.Thread):
                 except (ValueError, llm.AIError, OSError) as exc:
                     if not prof.get('image_optional'):
                         raise
+                    from . import problems
+                    problems.add({'title':'Concept image needs review — lead #'+str(lid), 'detail':str(exc)[:500]+'; image omitted and email rewritten without attachment claims.'})
                     d['image_skipped_reason'] = str(exc)[:200]
                     p['concept_ready'] = False
                     d.pop('image_prompt', None)

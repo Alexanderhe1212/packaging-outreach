@@ -125,7 +125,7 @@ Trusted target JSON: ''' +json.dumps(target,ensure_ascii=False)+'\nResearch cons
                     'Avoid Shopify storefronts and contact URLs under /pages/ because they are rate-limited in this runtime. Prefer simple corporate Contact pages. '
                     'Prefer food, tea, coffee, cosmetics, candles, gifts, jewellery brands that use physical packaging; exclude packaging suppliers, directories and marketplaces. '
                     'Read the official product and Contact/About pages. Return just one company using the schema. '
-                    'Supply official website, company name, fit_source product URL and concise factual fit_reason; packaging fit does not prove buying intent. '
+                    'Supply official website, company name and fit_source pointing to ONE exact primary product, not a category, accessory, contact page or homepage. In fit_reason record its published product name, actual container/format, material and size only when stated, plus why a specific outer box could be relevant. Prefer the brand core product over accessories. Packaging fit does not prove buying intent. '
                     'Prefer a published named business contact and their work email. If unavailable, return name and title empty and an official general or wholesale email. '
                     'Do not invent names, email patterns, phone ownership or WhatsApp accounts. Sources must include original URLs and short quotes. '
                     'Avoid all excluded domains. At most 4 targeted searches, then stop. No paid services, login, sending or local file access. '

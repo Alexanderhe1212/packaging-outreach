@@ -45,6 +45,16 @@ def overview(_query=None):
     return dict(contacts=rows,imported=imported,accounts=[dict(id=a['id'],name=a.get('name',a['id'])) for a in config.load()['accounts']],
                 automatic=store.get('radar_source',{}),discovery=discovery_status())
 
+def research_url(contact):
+    website = contact['website']
+    target = contact.get('fit_source') or ''
+    parts = urlsplit(target)
+    if (parts.scheme in ('http','https') and not parts.username and not parts.password
+            and web.root_domain(web.host(target)) == web.root_domain(web.host(website))
+            and parts.path.strip('/') and not web.NON_PRODUCT_PATH.search(target)):
+        return target
+    return website
+
 def import_contacts(data, held=True):
     account=data['account'];config.account(account)
     ids=data.get('contact_ids',[])
@@ -60,7 +70,7 @@ def import_contacts(data, held=True):
             seen.add(domain)
             if store.q("SELECT id FROM leads WHERE source='user_radar' AND domain=?",(domain,),one=True):
                 skipped.append(dict(domain=domain,reason='已经导入过'));continue
-            manual=dict(url=p['website'],email=p['email'],radar=dict(p))
+            manual=dict(url=research_url(p),email=p['email'],radar=dict(p))
             lid=store.claim_prospect(account,dict(company=p.get('company') or domain,domain=domain,email=p['email']),
                                      source='user_radar',manual=manual,hold=held)
             if lid:
