@@ -62,10 +62,11 @@ class CooldownTests(unittest.TestCase):
   self.assertEqual(config.account('GUKA')['daily_limit'],0);self.assertTrue(self.reserve(self.fresh())[0])
  def test_pre_data_rechecks_new_suppression(self):
   old=self.old_lead(8*86400);token,r=self.reserve(self.fresh());self.assertTrue(store.transport_allowed(token));store.suppress('brand.test','unsubscribe');self.assertFalse(store.transport_allowed(token))
- def test_history_reused_once_without_rewriting_sent_record(self):
-  old=self.old_lead(8*86400);before=store.lead(old);new=store.queue_recontact('MTT');self.assertIsNotNone(new)
-  fresh=store.lead(new);self.assertEqual(fresh['status'],'queued');self.assertEqual(fresh['subject'],'');self.assertEqual(fresh['data']['prospect']['prior_contact']['body'],'Previous body');self.assertEqual(store.lead(old),before);self.assertIsNone(store.queue_recontact('MTT'))
-  store.update(new,status='backlog');self.assertIsNone(store.queue_recontact('MTT'),'do not re-research the same failed evidence every loop')
+ def test_sent_history_is_not_automatically_recycled(self):
+  old=self.old_lead(8*86400);before=store.lead(old)
+  self.assertIsNone(store.queue_recontact('MTT'))
+  self.assertEqual(store.lead(old),before)
+  self.assertEqual(len(store.q('SELECT id FROM leads')),1)
  def test_candidate_can_return_after_window(self):
   old=self.old_lead(8*86400);store.x("INSERT INTO candidates(domain,account,status,created_at) VALUES(?,?,?,?)",('brand.test','MTT','used',self.now-8*86400))
   self.assertEqual(store.add_candidates('GUKA',[{'domain':'brand.test','brand':'Brand & Co','opportunity_tier':'A'}]),1);self.assertEqual(store.claim_candidate('GUKA')['domain'],'brand.test')
