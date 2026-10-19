@@ -407,8 +407,9 @@ class Stage:
             if model:
                 args += ['-m', model]
             for f in self.CODEX_OFF:
-                if not (generate_image and f == 'code_mode_host'):  # image generation runs through the code-mode host
+                if f != 'code_mode_host':  # Current CLI requires its host even for text-only execution.
                     args += ['--disable', f]
+            args += ['--enable', 'code_mode_host']
             args += ['--enable' if generate_image else '--disable', 'image_generation']
             home = self.codex_home()
             args[args.index('-o'):args.index('-o')] = ['-c', 'model_instructions_file="%s"' % (home / 'instructions.md')]
@@ -431,6 +432,24 @@ class Stage:
                     events.append(json.loads(line))
                 except ValueError:
                     pass
+            # Exit code zero does not imply tools were usable. Never turn a tool
+            # initialization error into a successful empty discovery batch.
+            event_errors = [e.get('item') or e for e in events
+                            if e.get('type') in ('error', 'turn.failed')
+                            or (e.get('item') or {}).get('type') == 'error']
+            self.search_diagnostics = {
+                'event_types': sorted(set(str(e.get('type', '')) for e in events)),
+                'item_types': sorted(set(str((e.get('item') or {}).get('type', '')) for e in events)),
+                'error_count': len(event_errors), 'exit_code': p.returncode,
+                'search_queries': [re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', '[email]', str((e.get('item') or {}).get('query','')))[:240]
+                                   for e in events if e.get('type') == 'item.completed'
+                                   and (e.get('item') or {}).get('type') == 'web_search'
+                                   and (e.get('item') or {}).get('query')][:8],
+            }
+            if event_errors:
+                host_disabled = any('code-mode host is disabled' in str(e).lower() for e in event_errors)
+                raise AIError('Codex 搜索工具初始化失败：Code Mode host 未启用' if host_disabled
+                              else 'Codex 工具返回错误，本轮搜索结果未采纳', setup=host_disabled)
             usage = next((e.get('usage') for e in reversed(events) if e.get('type') == 'turn.completed' and e.get('usage')), {}) or {}
             thread = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), '')
             if p.returncode != 0:

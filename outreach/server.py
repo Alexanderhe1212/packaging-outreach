@@ -11,10 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import VERSION, archive, config, legacy, llm, mailer, pipeline, store, updater, web
+from . import VERSION, archive, config, exhibition, legacy, llm, mailer, pipeline, store, updater, web, radar, problems
 from .worker import AccountWorker
 
 WORKERS = {}
+INSTANCE_ID = uuid.uuid4().hex
+SERVICE_STARTED = time.time()
 UI = config.ROOT / 'ui' / 'index.html'
 
 
@@ -55,13 +57,17 @@ def api_state(_q):
         w = WORKERS.get(a['id'])
         accounts.append(dict(id=a['id'], name=a.get('name') or a['id'], sender=a['sender'], profile=a.get('profile', 'packaging'),
                              paused=w.paused if w else True, activity=w.activity if w else '', error=w.error if w else '',
+                             worker_alive=bool(w and w.is_alive()), activity_since=getattr(w,'activity_since',None),
+                             current_stage=store.q("SELECT stage,started FROM stage_runs WHERE account=? AND outcome='running' ORDER BY id DESC LIMIT 1",(a['id'],),one=True),
+                             discovery=store.get('discovery_last_'+a['id']),
+                             screening_mode='明确采购需求' if config.profile(a.get('profile','packaging')).get('discovery_rules') else '产品适配询问',
                              stats=store.stats(a['id']), auto_send=a.get('auto_send', True), daily_limit=int(a.get('daily_limit') or 0),
                              color=a.get('color', ''), mailbox=store.get('mailbox_' + a['id']),
                              archive=store.get('archive_last_' + a['id'])))
     conns = cfg['connections']
     ready = all(sec['keys'].get(s.get('connection')) or conns.get(s.get('connection'), {}).get('preset') == 'codex'
                 for s in cfg['stages'].values())
-    return dict(version=VERSION, accounts=accounts, api_ready=ready, daily_limit_total=int(cfg.get('daily_limit_total') or 0), legacy=store.get('legacy_imported'),
+    return dict(version=VERSION, build="operations-20261016", server_time=time.time(), cooldown_seconds=store.CONTACT_COOLDOWN_SECONDS, accounts=accounts, api_ready=ready, daily_limit_total=int(cfg.get('daily_limit_total') or 0), legacy=store.get('legacy_imported'),
                 data_dir=str(config.data_dir()), legacy_running=legacy_running(cfg.get('legacy', {}).get('ports', [])))
 
 
@@ -165,7 +171,30 @@ def api_redo(data):
     lead = store.lead(int(data['id']))
     if lead['status'] in ('sent', 'sending', 'unknown', 'bounced', 'unsubscribed', 'replied', 'imaging', 'writing', 'researching'):
         raise ValueError('当前状态不能重做')
+    if lead.get('sent_at') or lead.get('message_id') or store.hard_blocked(lead.get('email',''), lead['account']):
+        raise ValueError('已有发送记录或客户已抑制，不可重复发送')
     d = lead['data']
+    if data.get('what') == 'rate_limit':
+        reason=lead.get('error','')
+        if lead['status']!='failed' or not ('429' in reason or reason.startswith('DeferredFetch:')):
+            raise ValueError('仅恢复限流失败记录')
+        d.setdefault('retry_history',[]).append(dict(at=time.time(),error=reason,action='resume_rate_limit'))
+        # Stagger recovery without shortening an existing server deadline.
+        d['research_retry_at']=max(float(d.get('research_retry_at') or 0),time.time()+__import__('random').uniform(60,900))
+        d.pop('prospect',None)
+    if data.get('what') == 'introduction':
+        if lead['source']!='user_radar' or not d.get('manual',{}).get('radar',{}).get('sources'):
+            raise ValueError('推荐信仍需要已保存的官网邮箱证据')
+        d.setdefault('retry_history',[]).append(dict(at=time.time(),error=lead.get('error',''),email=lead.get('email',''),action='prepare_general_introduction'))
+        d['manual']['introduction_mode']=True
+        d.pop('prospect',None)
+    if data.get('what') == 'research':
+        d.setdefault('retry_history', []).append(dict(at=time.time(), error=lead.get('error',''), email=lead.get('email','')))
+        d.pop('prospect', None)
+        # Keep original Radar evidence; re-discover the actual public mailbox instead of reusing a bad hint.
+        d.setdefault('manual', {})['email'] = ''
+        d['manual']['email_recheck']=True
+        d['manual'].setdefault('url', lead.get('domain',''))
     d.pop('image_prompt', None)
     if data.get('what') != 'image':
         d.pop('plan', None)
@@ -175,6 +204,7 @@ def api_redo(data):
 
 
 def api_settings_post(data):
+    previous_accounts = {a['id']: dict(a) for a in config.load()['accounts']}
     patch = {k: data[k] for k in ('connections', 'stages', 'inbox_check_minutes', 'daily_limit_total', 'cross_account_dedupe') if k in data}
     if 'accounts' in data:
         seen = set()
@@ -186,7 +216,15 @@ def api_settings_post(data):
         patch['accounts'] = data['accounts']
     patch['cross_account_dedupe']=True
     if patch:
-        config.save(patch)
+        config.save(dict(patch))
+    for acc in patch.get('accounts', []):
+        old = previous_accounts.get(acc['id'], {})
+        interval = acc.get('send_interval_minutes', [4, 9])
+        if interval != old.get('send_interval_minutes', [4, 9]):
+            attempt = store.q('SELECT result,finished FROM send_attempts WHERE account=? ORDER BY started DESC LIMIT 1', (acc['id'],), one=True)
+            if attempt and attempt['result'] == 'sent' and attempt['finished']:
+                key = 'next_send_' + acc['id']
+                store.put(key, min(float(store.get(key, 0)), float(attempt['finished']) + max(map(float, interval)) * 60))
     config.save_secrets(keys=data.get('keys'), passwords=data.get('passwords'))
     sync_workers()
     for w in WORKERS.values():
@@ -272,10 +310,14 @@ def api_quit(_data):
     return {'ok': True}
 
 
-GET = {'/api/audit': lambda qs: {'items': store.q('SELECT * FROM audit ORDER BY id DESC LIMIT 100')}, '/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
+GET = {'/api/crawl-retries': lambda qs: {'items': store.q("SELECT c.account,c.domain,c.status,c.reason,r.attempts,r.next_at FROM candidates c JOIN crawl_retries r ON c.domain=r.domain WHERE c.account=? AND c.status IN ('retry_wait','retry_exhausted') ORDER BY r.next_at LIMIT 50", (qs.get('account',[''])[0],))}, '/api/operations': lambda qs: store.operation_report(int(qs.get('days',['7'])[0])), '/api/audit': lambda qs: {'items': store.q('SELECT * FROM audit ORDER BY id DESC LIMIT 100')}, '/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
        '/api/usage': lambda qs: store.usage_summary(int(qs.get('days', ['7'])[0])),
-       '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION}}
-POST = {'/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
+       '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION, 'build': 'operations-20261016', 'instance_id': INSTANCE_ID, 'started_at': SERVICE_STARTED}}
+GET['/api/radar']=radar.overview
+GET['/api/problems']=problems.overview
+POST = {'/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
+        '/api/exhibition/prepare': exhibition.prepare, '/api/exhibition/approve': exhibition.approve, '/api/exhibition/revise': exhibition.revise,
+        '/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
         '/api/send': api_send, '/api/skip': api_skip, '/api/edit': api_edit, '/api/redo': api_redo,
         '/api/settings': api_settings_post, '/api/profile': api_profile, '/api/signature': api_signature,
         '/api/import-csv': api_import, '/api/archive': api_archive, '/api/open-folder': api_open_folder,
@@ -314,6 +356,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path in ('/', '/index.html'):
                 return self.reply(UI.read_bytes(), ctype='text/html; charset=utf-8')
+            if u.path == '/problems':
+                return self.reply((config.ROOT/'ui/problems.html').read_bytes(), ctype='text/html; charset=utf-8')
+            if u.path == '/radar':
+                return self.reply((config.ROOT/'ui/radar.html').read_bytes(), ctype='text/html; charset=utf-8')
             if u.path in GET:
                 return self.reply(GET[u.path](parse_qs(u.query)))
             if u.path.startswith('/api/lead/'):
