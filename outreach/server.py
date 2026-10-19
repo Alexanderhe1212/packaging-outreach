@@ -315,7 +315,7 @@ GET = {'/api/crawl-retries': lambda qs: {'items': store.q("SELECT c.account,c.do
        '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION, 'build': 'operations-20261016', 'instance_id': INSTANCE_ID, 'started_at': SERVICE_STARTED}}
 GET['/api/radar']=radar.overview
 GET['/api/problems']=problems.overview
-POST = {'/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
+POST = {'/api/radar/recheck-handoff': radar.recheck_handoff, '/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
         '/api/exhibition/prepare': exhibition.prepare, '/api/exhibition/approve': exhibition.approve, '/api/exhibition/revise': exhibition.revise,
         '/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
         '/api/send': api_send, '/api/skip': api_skip, '/api/edit': api_edit, '/api/redo': api_redo,

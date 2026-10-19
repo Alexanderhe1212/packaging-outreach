@@ -318,6 +318,12 @@ def usage_summary(days=7):
 def stats(account):
     rows = q('SELECT status,count(*) n FROM leads WHERE account=? GROUP BY status', (account,))
     s = {r['status']: r['n'] for r in rows}
+    # Backpressure counts work that can run now, not remote cooldown waits.
+    deferred = q("SELECT count(*) n FROM leads WHERE account=? AND status='queued' AND COALESCE(json_extract(data,'$.research_retry_at'),0)>?", (account,time.time()), one=True)['n']
+    s['deferred_research'] = deferred
+    scheduled = q("SELECT count(*) n FROM leads WHERE account=? AND status='queued' AND COALESCE(json_extract(data,'$.research_retry_at'),0)>0", (account,), one=True)['n']
+    s['due_research_retries'] = max(0,scheduled-deferred)
+    s['actionable_pending'] = max(0,s.get('queued',0)-scheduled) + sum(s.get(k,0) for k in ('researching','writing','imaging','ready'))
     s['sent_today'] = sent_today(account)  # quota semantics unchanged
     s.update(delivery_stats(account))
     s['candidates'] = q("SELECT count(*) n FROM candidates WHERE account=? AND status='new'", (account,), one=True)['n']

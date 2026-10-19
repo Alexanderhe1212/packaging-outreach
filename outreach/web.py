@@ -48,6 +48,9 @@ TLD_COUNTRY = {'uk': 'United Kingdom', 'de': 'Germany', 'fr': 'France', 'nl': 'N
 class CrawlError(ValueError):
     pass
 
+class IneligibleProspect(CrawlError):
+    pass
+
 
 # ---------------- fetching ----------------
 class PublicRedirectHandler(urllib.request.HTTPRedirectHandler):
