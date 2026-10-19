@@ -10,7 +10,7 @@ import threading
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
-from . import config,store,web
+from . import config,store,web,prospect_filter
 from .person_identity import plausible_person_name
 
 LOCK=threading.RLock()
@@ -35,6 +35,7 @@ def contacts():
         if not (p.get('name') and p.get('qualified') or p.get('contact_kind')=='company_public'):continue
         if p.get('name') and not plausible_person_name(p['name']):
             p=dict(p,name='',qualified=False,contact_kind='company_public')
+        if prospect_filter.reason(p.get('company',''),p.get('fit_reason','')):continue
         eligible.append(p)
     return eligible
 
@@ -130,3 +131,32 @@ def pull_one(account):
             result=import_contacts(dict(account=account,contact_ids=[p['id']]),held=False)
             if result['ids']:return store.lead(result['ids'][0])
     return None
+
+
+def recheck_handoff(data):
+    """Requeue only a failed, never-sent original from an existing saved contact."""
+    # Fetch the local Radar response before taking the database lock.
+    contact=next((p for p in contacts() if p['id']==data['contact_id']),None)
+    with LOCK, store._lock:
+        lead = store.lead(int(data['lead_id']))
+        if not lead:raise ValueError('原客户记录不存在')
+        if lead['status'] in ('sent','sending','unknown','bounced','unsubscribed','replied') or lead.get('sent_at') or lead.get('message_id') or store.hard_blocked(lead.get('email',''),lead['account']):
+            return {'status':'protected','lead_id':lead['id']}
+        if store.q("SELECT id FROM send_attempts WHERE lead=? AND result IN ('sent','sending','unknown','bounced')",(lead['id'],),one=True):
+            return {'status':'protected','lead_id':lead['id']}
+        if lead['status'] in ('queued','researching','writing','imaging','ready'):
+            return {'status':'already_active','lead_id':lead['id']}
+        if lead['status']!='failed':return {'status':'review_required','lead_id':lead['id']}
+        if not contact: return {'status':'review_required','reason':'saved_contact_not_eligible','lead_id':lead['id']}
+        if web.root_domain(web.host(contact['website']))!=web.root_domain(lead['domain']):
+            raise ValueError('补查联系人不属于原官网')
+        if store.hard_blocked(contact['email'],lead['account']):return {'status':'protected','lead_id':lead['id']}
+        d=lead['data']
+        d.setdefault('retry_history',[]).append({'at':__import__('time').time(),'action':'saved_recheck_handoff','contact_id':contact['id'],'error':lead.get('error','')})
+        d['manual']={'url':contact['website'],'email':contact['email'],'radar':dict(contact),'introduction_mode':True}
+        for key in ('prospect','plan','image_prompt'):d.pop(key,None)
+        # Keep retry deadlines and the original account. Existing claims and all
+        # send gates are checked again by the normal worker before any SMTP call.
+        store.update(lead['id'],status='queued',data=d,error='',image='')
+        store.audit('recheck_handoff',lead['account'],lead['id'],data.get('_origin'),'queued')
+        return {'status':'queued','lead_id':lead['id'],'account':lead['account']}

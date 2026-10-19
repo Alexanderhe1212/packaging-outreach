@@ -295,6 +295,9 @@ class AccountWorker(threading.Thread):
                     return
                 store.update(lid, company=p['company'], domain=p['domain'], email=p['email'], data=d)
             p = d['prospect']
+            from .prospect_filter import prospect_reason
+            reason = prospect_reason(p)
+            if reason:raise web.IneligibleProspect(reason)
             contact = (d.get('manual') or {}).get('radar') or {}
             if contact.get('company'):
                 p['recipient_company'] = contact['company']
@@ -371,6 +374,10 @@ class AccountWorker(threading.Thread):
             store.update(lid, status='ready', data=d, error='')
             self.error = ''
             self.activity = '已准备好：' + name
+        except web.IneligibleProspect as e:
+            d['screening'] = {'eligible':False, 'reason':str(e), 'checked_at':time.time()}
+            store.update(lid,status='skipped',error=str(e),data=d)
+            self.activity = '已筛除不匹配客户，继续下一家'
         except llm.AIError as e:
             store.update(lid, status='queued' if e.fatal else 'failed', error=str(e)[:300], data=d)
             raise
@@ -409,6 +416,13 @@ class AccountWorker(threading.Thread):
             if lead['source'] != 'exhibition' and self.profile.get('discovery_rules') and (lead['data'].get('prospect',{}).get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
                 store.audit('send_denied',self.id,lead['id'],origin,'procurement_evidence_required')
                 return 'procurement_evidence_required'
+            from .prospect_filter import prospect_reason
+            reason = prospect_reason(lead['data'].get('prospect') or {})
+            if reason:
+                if lead['status'] == 'ready' and not lead.get('sent_at') and not lead.get('message_id'):
+                    store.update(lead['id'],status='skipped',error=reason)
+                store.audit('send_denied',self.id,lead['id'],origin,'non_target_business')
+                return 'non_target_business'
             img=Path(lead['image']).read_bytes() if lead.get('image') and Path(lead['image']).exists() else None
             if self.profile.get('require_abc'):
                 p = lead['data'].get('prospect', {})

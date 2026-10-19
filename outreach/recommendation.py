@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
-from . import config,store,web
+from . import config,store,web,prospect_filter
 
 EXHIBITION=Path.home()/'Library/Application Support/UserRadar/source-research/us-2022-2026/contact-run'
 
@@ -27,6 +27,7 @@ def research(account, contact):
     site=web.normalize(contact.get('website',''))
     company=str(contact.get('company') or web.host(site))
     email=str(contact.get('email') or '').strip().lower()
+    if prospect_filter.reason(company):raise web.IneligibleProspect(prospect_filter.reason(company))
     own={web.root_domain(web.host(a.get('website',''))) for a in config.load()['accounts'] if a.get('website')}
     own.update(web.root_domain(a.get('sender','').split('@')[-1]) for a in config.load()['accounts'] if a.get('sender'))
     if web.root_domain(web.host(site)) in own or store.hard_blocked(email,account['id']):
@@ -42,6 +43,8 @@ def research(account, contact):
                 raise web.CrawlError(str(error)) from error
             last_error=error
             continue
+        reason=prospect_filter.reason(company,web.strip_tags(_doc))
+        if reason:raise web.IneligibleProspect(reason)
         fact,fact_source=observation(contact,final)
         return dict(company=company,customer_brand=company,website=site,domain=web.host(site),email=email,
                     email_source=final,email_verified=True,introduction_only=True,concept_ready=False,
