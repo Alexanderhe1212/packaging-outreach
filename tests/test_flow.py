@@ -38,6 +38,11 @@ class FakeAPI(BaseHTTPRequestHandler):
                    'usage': {'input_tokens': 2100, 'output_tokens': 300, 'input_tokens_details': {'cached_tokens': 0}}}
         elif self.path.endswith('/chat/completions'):
             req = json.loads(body)
+            if 'Review this packaging concept image' in str(req['messages'][0]['content']):
+                self.send_json({'choices':[{'message':{'content':json.dumps({'approved':True,'reason':'fictional fixture matches'})}}]});return
+            if 'Extract the real person explicitly associated' in str(req['messages'][0]['content']):
+                self.send_json({'choices':[{'message':{'content':json.dumps({'name':'','email':'emberoakcandles@gmail.com','quote':''})}}]})
+                return
             assert req['messages'][1]['content'][1]['image_url']['detail'] == 'low', 'vision input missing'
             if req.get('reasoning_effort'):
                 return self.fail(400, 'Unsupported parameter: reasoning_effort')  # relay that rejects it -> auto retry

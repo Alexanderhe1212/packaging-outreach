@@ -53,7 +53,8 @@ def research(account, contact):
                                         'official_page_excerpt':web.strip_tags(_doc)[:6000],
                                         'official_page_source':final},
                     match_reason='General packaging introduction; product and purchasing needs have not been verified.',
-                    purchase_signal='general_introduction',product_facts=[],product_image_url=''),None
+                    purchase_signal='general_introduction',product_facts=[],product_image_url='',
+                    **web.recipient_evidence(_doc,email,final)),None
     if contact.get('recheck_email'):
         # Bounded official-site rediscovery; never replace a mailbox from a guess.
         doc,final=web.page(site)

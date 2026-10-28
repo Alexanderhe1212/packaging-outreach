@@ -37,7 +37,8 @@ class FetchGuard:
     def wait_seconds(self, domain=None):
         with self.lock:
             state = self._state()
-            until = state.get('global_until', 0)
+            # A burst on failed sites must not hold unrelated customer research.
+            until = state.get('global_until', 0) if domain in state.get('burst_domains', []) else 0
             if domain:
                 until = max(until, state['domains'].get(domain, {}).get('until', 0))
             return max(0, until - self.clock())
@@ -88,6 +89,7 @@ class FetchGuard:
                 if len(recent) >= 5:
                     if state.get('global_until', 0) <= now:
                         state['global_until'] = now + 30
+                        state['burst_domains'] = list(recent)
                     recent = {}
             state['recent_429'] = recent
             self.save(state)

@@ -4,14 +4,20 @@
 邮箱：首页 → 联系/关于/Impressum 等页面；只采用官网上真实出现的地址。
 """
 import gzip
+import hashlib
 import zlib
 import io
 import html as htmllib
+import importlib.util
 import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 import random
 import re
+import socket
 import ssl
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 from urllib.parse import urljoin, urlsplit
@@ -38,6 +44,8 @@ SKIP_EMAIL = re.compile(r'(?i)(noreply|no-reply|donotreply|example\.|sentry|wixp
                         r'@(sentry|shopify|myshopify|squarespace|wix|godaddy|domain|email|yourdomain|company)\.)')
 GOOD_PREFIX = ('hello', 'info', 'contact', 'sales', 'wholesale', 'enquiries', 'inquiries', 'enquiry', 'team', 'office',
                'shop', 'studio', 'hi', 'mail', 'business', 'partnerships', 'trade', 'b2b', 'kontakt', 'bonjour')
+BUYER_PREFIX = ('purchase', 'purchasing', 'procurement', 'sourcing', 'buyer', 'buying', 'einkauf', 'inkoop', 'achats')
+BUYER_ROLE = re.compile(r'(?i)\b(purchas\w*|procurement|sourcing|buyer|buying|einkauf\w*|inkoop\w*|achats|inköp|aankoop)\b|采购')
 OK_PREFIX = ('support', 'care', 'customercare', 'customerservice', 'service', 'help', 'admin', 'store')
 CONTACT_HINT = re.compile(r'(?i)contact|kontakt|impressum|imprint|about|our-story|legal|faq|wholesale|stockist|trade|customer-?service|help')
 TLD_COUNTRY = {'uk': 'United Kingdom', 'de': 'Germany', 'fr': 'France', 'nl': 'Netherlands', 'ie': 'Ireland', 'au': 'Australia',
@@ -83,23 +91,66 @@ def _get_once(url, accept='text/html,application/xhtml+xml,*/*;q=0.8', max_bytes
         return raw, r.geturl(), r.headers.get('Content-Type', '')
 
 
+def pdf_markup(raw):
+    """Read visible PDF text in a bounded child process, never binary email strings."""
+    if not raw.startswith(b'%PDF-'):
+        raise CrawlError('官网 PDF 内容无效')
+    python = sys.executable
+    if importlib.util.find_spec('pypdf') is None:
+        # Reuse the installed reader used by User Radar; never download a parser.
+        python = str(Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3')
+        if not Path(python).is_file():
+            raise CrawlError('公开 PDF 阅读器不可用，保留待复核')
+    code = '''import io,json,sys
+from pypdf import PdfReader
+reader=PdfReader(io.BytesIO(sys.stdin.buffer.read()))
+if reader.is_encrypted:
+    raise ValueError("encrypted PDF")
+pages=[]
+remaining=2000000
+for page in reader.pages[:40]:
+    text=(page.extract_text() or "")[:remaining]
+    pages.append(text)
+    remaining-=len(text)
+    if remaining<=0:
+        break
+print(json.dumps(pages))
+'''
+    try:
+        result = subprocess.run([python, '-c', code], input=raw, capture_output=True, timeout=20, check=True)
+        pages = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise CrawlError('公开 PDF 文本读取失败或超时，保留待复核') from exc
+    return ''.join('<section data-pdf-page="%d"><p>%s</p></section>' %
+                   (i + 1, '</p><p>'.join(htmllib.escape(block) for block in re.split(r'\n\s*\n', text)))
+                   for i, text in enumerate(pages))
+
+
 def page(url):
-    raw, final, ctype = get(url)
+    from pipeline_core.fetcher import read
+    return read(url,_page_uncached)
+
+def _page_uncached(url):
+    explicit_pdf = urlsplit(url).path.lower().endswith('.pdf')
+    max_bytes = 25_000_000 if explicit_pdf else 4 * 1024 * 1024
+    raw, final, ctype = get(url, max_bytes=max_bytes) if explicit_pdf else get(url)
     if raw.startswith(b'\x1f\x8b'):
         try:
-            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:raw=stream.read(4*1024*1024+1)
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:raw=stream.read(max_bytes+1)
         except (OSError,EOFError) as error:
             # Some servers append a newline after a valid gzip member. Accept
             # only whitespace after a complete CRC-checked stream, never damage.
             try:
                 decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                decoded = decoder.decompress(raw, 4*1024*1024+1)
+                decoded = decoder.decompress(raw, max_bytes+1)
                 if not decoder.eof or decoder.unused_data.strip():
                     raise ValueError('incomplete gzip or unexpected trailing data')
                 raw = decoded
             except (zlib.error, ValueError) as invalid:
                 raise CrawlError('官网压缩内容无效') from invalid
-        if len(raw)>4*1024*1024:raise CrawlError('response too large')
+        if len(raw)>max_bytes:raise CrawlError('response too large')
+    if raw.startswith(b'%PDF-') or 'application/pdf' in (ctype or '').lower():
+        return pdf_markup(raw), final
     m = re.search(r'charset=([\w-]+)', ctype or '')
     return raw.decode(m.group(1) if m else 'utf-8', 'replace'), final
 
@@ -170,7 +221,8 @@ def brand_tokens(site_root, brand=''):
 
 
 def score_email(e, site_root, brand=''):
-    if SKIP_EMAIL.search(e) or re.match(r'(?i)^(orders?|returns?|refunds?|complaints?|support|care|customercare|customerservice|help|service|shipping|tracking)@', e):
+    from .person_identity import press_mailbox
+    if SKIP_EMAIL.search(e) or press_mailbox(e) or re.match(r'(?i)^(orders?|returns?|refunds?|complaints?|support|care|customercare|customerservice|help|service|shipping|tracking)@', e):
         return -1
     local, domain = e.split('@', 1)
     if root_domain(domain) == site_root:
@@ -179,7 +231,9 @@ def score_email(e, site_root, brand=''):
         s = 2  # e.g. emberoakcandles@gmail.com; a private-looking freemail address is not used
     else:
         return -1  # agency, platform or unrelated company address
-    if local.startswith(GOOD_PREFIX):
+    if local.startswith(BUYER_PREFIX):
+        s += 15
+    elif local.startswith(GOOD_PREFIX):
         s += 5
     elif local.startswith(OK_PREFIX):
         s += 3
@@ -207,8 +261,8 @@ def contact_links(doc, base):
     return links
 
 
-def business_emails(doc):
-    """Only visible public contacts; reject conflicting mailto labels and restricted inbox context."""
+def public_contact_markup(doc):
+    """Keep explicitly published email spellings and links in their original location."""
     doc = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', doc or '')
     # Decode public Cloudflare email spans; this is published text, not a guessed address.
     def decode_public(match):
@@ -220,24 +274,103 @@ def business_emails(doc):
             return match.group(0)
     doc = re.sub(r"(?i)<[^>]+data-cfemail=([\"'])([a-f0-9]+)\1[^>]*>", decode_public, doc)
     # Discard only the contradictory occurrence, not independent valid evidence elsewhere.
-    def clear_conflict(match):
+    def expand_mailto(match):
         href = htmllib.unescape(match.group(1)).strip()
+        href = re.sub(r'(?i)^(mailto:)+', '', href).replace('%40', '@')
         displayed = EMAIL_RE.findall(strip_tags(match.group(2)))
-        return ' ' if displayed and any(e.lower() != href.lower() for e in displayed) else match.group(0)
-    doc = re.sub(r"<a[^>]+href=[\"']mailto:([^\"'?]+)[^\"']*[\"'][^>]*>(.*?)</a>", clear_conflict, doc, flags=re.I | re.S)
+        if displayed and any(e.lower() != href.lower() for e in displayed):
+            return ' '
+        if not EMAIL_RE.fullmatch(href):
+            return match.group(2)
+        return match.group(2) if displayed else match.group(2) + ' ' + htmllib.escape(href)
+    doc = re.sub(r"<a[^>]+href=[\"']mailto:([^\"'?]+)[^\"']*[\"'][^>]*>(.*?)</a>", expand_mailto, doc, flags=re.I | re.S)
+    doc = re.sub(r'\s*(\[at\]|\(at\)|\{at\})\s*', '@', doc, flags=re.I)
+    return re.sub(r'\s*(\[dot\]|\(dot\))\s*', '.', doc, flags=re.I)
+
+
+def public_contact_text(doc):
+    return strip_tags(public_contact_markup(doc))
+
+
+def recipient_evidence(doc, email, source):
+    """Retain bounded identity evidence from the page we have already verified."""
+    email = str(email or '').strip().lower()
+    text = public_contact_text(doc)
+    matches = list(re.finditer(re.escape(email), text, re.I))[:8] if email else []
+    if not matches:
+        raise CrawlError('联系人邮箱原文暂未读取到，待复核称呼')
+    return {
+        'recipient_source_key': hashlib.sha256((email + source).encode()).hexdigest(),
+        'recipient_source_context': '\n'.join(text[max(0,m.start()-450):m.end()+450] for m in matches),
+    }
+
+
+def contact_blocks(doc):
+    return re.split(r'(?i)</?(?:p|div|li|section|footer|br|h[1-6])\b[^>]*>', public_contact_markup(doc))
+
+
+def restricted_contact(text):
+    return bool(re.search(r'(?i)(privacy (?:requests?|rights?|enquir)|data protection|datenschutz|'
+                          r'website (?:design|built|developed)|web (?:design|agency)|'
+                          r'press (?:enquir|contact|office)|media (?:enquir|contact)|'
+                          r'job applications?|careers?|vacancies|complaints?|refunds?)', text))
+
+
+def business_emails(doc):
+    """Only public business contacts; restricted occurrences do not taint valid ones elsewhere."""
     found = []
     # Context is local to a contact block. A returns section elsewhere must not
     # invalidate a separately published general or trade enquiry address.
-    for block in re.split(r'(?i)</?(?:p|div|li|section|footer|br|h[1-6])\b[^>]*>', doc):
+    for block in contact_blocks(doc):
         text = strip_tags(block)
         bad = set()
         for match in EMAIL_RE.finditer(text):
             context = text[max(0, match.start()-95):match.end()+50]
-            if re.search(r'(?i)(order (?:enquir|inquir|quer|status)|returns? (?:and|or|only)|refund|complaint|existing orders?)', context):
+            if restricted_contact(context) or re.search(r'(?i)(order (?:enquir|inquir|quer|status)|returns? (?:and|or|only)|existing orders?)', context):
                 if not re.search(r'(?i)(all|general|business|wholesale|partnership) (?:enquir|inquir|contact)', context):
                     bad.add(match.group().lower())
         found.extend(e for e in emails_in(block) if e not in bad and e not in found)
     return found
+
+
+def email_role_blocks(doc):
+    markup = public_contact_markup(doc)
+    blocks = re.split(r'(?i)</?(?:p|div|li|section|footer|br|h[1-6])\b[^>]*>', markup)
+    # Table cells and article cards can contain a heading, role and email in
+    # separate child blocks. Only single-address containers confer priority.
+    blocks += re.findall(r'(?is)<(?:td|article)\b[^>]*>(.*?)</(?:td|article)>', markup)
+    return [strip_tags(b) for b in blocks]
+
+
+def published_email_score(email, doc, site_root, brand='', blocks=None):
+    """Alternate domains need explicit local business context on the official page."""
+    score = score_email(email, site_root, brand)
+    blocks = [b for b in (email_role_blocks(doc) if blocks is None else blocks) if email.lower() in b.lower()]
+    if score < 0:
+        # Reject restricted local parts even when the company publishes the address.
+        if score_email(email, root_domain(email.split('@')[-1]), brand) < 0:
+            return -1
+        if not any(not restricted_contact(b) and
+                   re.search(r'(?i)\b(business|general enquiries|sales|wholesale|partnerships?|purchasing|procurement|office|geschäft|commercial)\b', b)
+                   for b in blocks if len(b) < 700):
+            return -1
+        score = 8
+    for block in blocks:
+        # A block with several people cannot assign one person's role to everyone.
+        if len(set(emails_in(block))) == 1 and not restricted_contact(block) and BUYER_ROLE.search(block):
+            score += 20
+            break
+    return score
+
+
+def best_published_email(doc, site_root, brand='', email_hint=''):
+    candidates = business_emails(doc)
+    if email_hint:
+        candidates = [email_hint] if email_hint in candidates else []
+    blocks = email_role_blocks(doc)
+    ranked = [(published_email_score(e, doc, site_root, brand, blocks), e) for e in candidates]
+    # Retain source order for equal priorities instead of arbitrary reverse-alphabetic order.
+    return max(ranked, key=lambda p:p[0])[1] if ranked and max(p[0] for p in ranked) > 0 else ''
 
 
 def verified_email_page(email, source, site, brand=''):
@@ -246,7 +379,7 @@ def verified_email_page(email, source, site, brand=''):
     if not EMAIL_RE.fullmatch(email or '') or root_domain(host(source)) != root_domain(host(site)):
         raise CrawlError('邮箱必须有同品牌官网公开来源')
     doc, final = page(source)
-    if root_domain(host(final)) != root_domain(host(site)) or email not in business_emails(doc) or score_email(email, root_domain(host(site)), brand) <= 0:
+    if root_domain(host(final)) != root_domain(host(site)) or email not in business_emails(doc) or published_email_score(email, doc, root_domain(host(site)), brand) <= 0:
         raise CrawlError('邮箱来源未验证或仅用于订单/售后')
     return doc, final
 
@@ -258,8 +391,7 @@ def find_email(doc, base, brand='', limit=5, email_hint=''):
     email_hint = (email_hint or '').strip().lower()
     site_root = root_domain(host(base))
     def choose(d):
-        found = business_emails(d)
-        return best_email([email_hint] if email_hint and email_hint in found else ([] if email_hint else found), site_root, brand)
+        return best_published_email(d, site_root, brand, email_hint)
     email = choose(doc)
     if email and root_domain(email.split('@')[1]) == site_root:
         return email, base
@@ -287,7 +419,7 @@ def find_email(doc, base, brand='', limit=5, email_hint=''):
 
 
 # ---------------- products ----------------
-SKIP_PRODUCT = re.compile(r'(?i)gift[ -]?card|e[ -]?gift|voucher|digital download|online course|tickets?|workshop|tour experience|shipping protection|insurance|donation|deposit')
+SKIP_PRODUCT = re.compile(r'(?i)gift[ -]?card|\be[ -]?gift\b|voucher|digital download|online course|tickets?|workshop|tour experience|shipping protection|insurance|donation|deposit')
 SUPPLIER = re.compile(r'(?i)(?:packaging|rigid boxes?|paper bags?|mailer boxes?)\s+(?:manufacturer|supplier|wholesaler)|custom packaging solutions|packaging for your business')
 NON_PRODUCT_PATH = re.compile(r'(?i)/(?:blogs?|news|careers?|jobs?|press)/')
 
@@ -377,6 +509,24 @@ def jsonld_product(doc, base):
     return None
 
 
+def product_on_page(doc, final, base):
+    from .commerce_markup import CommercePage
+    product = jsonld_product(doc, final)
+    if product and not product.get('description'):
+        product['description'] = CommercePage(doc).description
+    if valid_product(product, base):
+        return product
+    title = meta(doc, 'og:title') or (re.search(r'<title>(.*?)</title>', doc, re.I | re.S) or [None, ''])[1]
+    img = meta(doc, 'og:image', 'og:image:secure_url')
+    if title and img and not SKIP_PRODUCT.search(title) and root_domain(host(final)) == root_domain(host(base)) and (meta(doc, 'og:type') == 'product' or meta(doc, 'product:price:amount', 'og:price:amount')):
+        price = meta(doc, 'product:price:amount', 'og:price:amount')
+        return {'name': strip_tags(title)[:120], 'url': final, 'image_url': urljoin(final, img),
+                'price': ('%s %s' % (price, meta(doc, 'product:price:currency', 'og:price:currency'))).strip() if price else '',
+                'facts': [], 'description': meta(doc, 'og:description', 'description')[:320], 'source': 'og'}
+    from .commerce_markup import CommercePage
+    return CommercePage(doc).product_data(final)
+
+
 def product_from_links(doc, base):
     links = re.findall(r'href=["\']([^"\']*/(?:products?|shop|item|p)/[^"\'?#]+)', doc, re.I)
     # BigCommerce uses flat product URLs; card headings identify candidates,
@@ -384,6 +534,9 @@ def product_from_links(doc, base):
     cards = re.findall(r'<h[1-6][^>]*class=["\'][^"\']*card-title[^"\']*["\'][^>]*>(.*?)</h[1-6]>', doc, re.I | re.S)
     for card in cards:
         links.extend(re.findall(r'href=["\']([^"\'?#]+)', card, re.I))
+    from .commerce_markup import CommercePage
+    markup = CommercePage(doc)
+    if markup.catalog: links = markup.links + links
     seen = []
     for href in links:
         u = urljoin(base, href)
@@ -397,14 +550,32 @@ def product_from_links(doc, base):
         p = jsonld_product(d, final)
         if valid_product(p, base):
             return p
-        title = meta(d, 'og:title') or (re.search(r'<title>(.*?)</title>', d, re.I | re.S) or [None, ''])[1]
-        img = meta(d, 'og:image', 'og:image:secure_url')
-        if title and img and not SKIP_PRODUCT.search(title) and root_domain(host(final)) == root_domain(host(base)) and (meta(d, 'og:type') == 'product' or meta(d, 'product:price:amount', 'og:price:amount')):
-            price = meta(d, 'product:price:amount', 'og:price:amount')
-            return {'name': strip_tags(title)[:120], 'url': final, 'image_url': urljoin(final, img),
-                    'price': ('%s %s' % (price, meta(d, 'product:price:currency', 'og:price:currency'))).strip() if price else '',
-                    'facts': [], 'description': meta(d, 'og:description', 'description')[:320], 'source': 'og'}
+        p = product_on_page(d, final, base)
+        if valid_product(p, base):
+            return p
     return None
+
+
+def catalog_product(doc, url):
+    """One bounded render for explicit catalogues, never substitute a selected SKU."""
+    path = urlsplit(url).path.rstrip('/').lower()
+    from .commerce_markup import CommercePage
+    catalogue = CommercePage(doc).catalog or path in ('/coffees','/shop','/products','/collections','/webshop','/the-products') or path.startswith('/product-category/')
+    if not catalogue: return None
+    product = product_from_links(doc, url)
+    if valid_product(product, url): return product
+    from pipeline_core.fetcher import render, publish
+    try:
+        rendered, final = render(url)
+    except urllib.error.HTTPError as exc:
+        raise CrawlError('动态商品目录读取失败（%s）' % web_error_label(exc)) from exc
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        raise CrawlError('动态商品目录暂不可读取：'+str(exc)[:120]) from exc
+    if root_domain(host(final)) != root_domain(host(url)):
+        raise CrawlError('动态目录跳转到不同公司，待核实')
+    publish(url,rendered,final)
+    product = product_on_page(rendered,final,url)
+    return product if valid_product(product,url) else product_from_links(rendered,final)
 
 
 def brand_name(doc, base):
@@ -436,7 +607,9 @@ def crawl(url, email_hint='', email_sources=None):
         requested = url if '://' in url else 'https://' + url
         if urlsplit(requested).path.strip('/'):
             product_doc, product_final = page(requested)
-            product = jsonld_product(product_doc, product_final)
+            product = product_on_page(product_doc, product_final, base)
+            if not valid_product(product, base):
+                product = catalog_product(product_doc, product_final)
             if not valid_product(product, base):
                 raise CrawlError('指定产品未核实，不自动换成其他商品')
             return product
@@ -455,7 +628,21 @@ def crawl(url, email_hint='', email_sources=None):
                     if root_domain(host(evidence_url)) != root_domain(host(base)):
                         continue
                     hint = best_email(business_emails(evidence), root_domain(host(base)), brand)
-                source = verify_email(hint, candidate, base, brand)
+                try:
+                    source = verify_email(hint, candidate, base, brand)
+                except CrawlError as exc:
+                    if transient_failure(exc):
+                        raise
+                    # A saved order/support hint must not hide another explicitly
+                    # published business address on this same official page.
+                    evidence, evidence_url = page(candidate)
+                    if root_domain(host(evidence_url)) != root_domain(host(base)):
+                        continue
+                    alternative = best_published_email(evidence, root_domain(host(base)), brand)
+                    if not alternative or alternative == hint:
+                        continue
+                    source = verify_email(alternative, evidence_url, base, brand)
+                    hint = alternative
                 email = hint
                 break
             except Exception as exc:
@@ -534,12 +721,12 @@ def transient_failure(exc):
         if isinstance(exc, DeferredFetch): return exc
         if isinstance(exc, urllib.error.HTTPError):
             if exc.code in (408, 429, 500, 502, 503, 504): return exc
-        elif isinstance(exc, (TimeoutError, ConnectionError)):
+        elif isinstance(exc, (TimeoutError, socket.timeout, ConnectionError)):
             return exc
         elif isinstance(exc, urllib.error.URLError):
             # Certificate, permission and DNS-not-found failures are not retried here.
             reason = getattr(exc, 'reason', None)
-            if isinstance(reason, (TimeoutError, ConnectionError)): return exc
+            if isinstance(reason, (TimeoutError, socket.timeout, ConnectionError)): return exc
         exc = exc.__cause__ or exc.__context__
     return None
 
@@ -547,8 +734,8 @@ def transient_failure(exc):
 def retry_after(exc):
     import time
     from email.utils import parsedate_to_datetime
-    if getattr(exc, 'retry_at', None):
-        return max(0., exc.retry_at-time.time())
+    if vars(exc).get('retry_at'):
+        return max(0., vars(exc)['retry_at']-time.time())
     raw = getattr(exc, 'headers', {}).get('Retry-After', '') if getattr(exc, 'headers', None) else ''
     try: return max(0., float(raw))
     except (ValueError, TypeError):
@@ -569,10 +756,15 @@ def get(url, accept='text/html,application/xhtml+xml,*/*;q=0.8', max_bytes=4*102
     with FETCH_GUARD.request(domain):
         try:
             result = _get_once(url, accept, max_bytes, timeout)
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError) as exc:
+            # Python 3.9 socket.timeout is not yet an alias of TimeoutError.
+            if isinstance(exc, socket.timeout) and not isinstance(exc, TimeoutError):
+                original = exc
+                exc = TimeoutError(str(original))
+                exc.__cause__ = original
             transient = transient_failure(exc)
             if transient:
                 transient.retry_at = FETCH_GUARD.failed(domain, getattr(transient, 'code', None), retry_after(transient))
-            raise
+            raise exc
         FETCH_GUARD.succeeded(domain)
         return result

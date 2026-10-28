@@ -16,3 +16,7 @@
 - Include Radar intake, problem tracking and the consolidated workspace accumulated since 1.3.2.
 
 Release validation: local regression tests and public-page smoke checks. Cross-platform CI must pass before promotion. SMTP acceptance is not delivery confirmation.
+
+## 2026-10-28 — Public customer source and Windows build kit
+
+Publish the current runtime without private operational data. Add an embedded-runtime NSIS customer installer build, installation manual, per-user pause-on-open launcher, license notices and synthetic cross-platform CI. Preserve sending and image protections. Older image-optional/re-contact test contracts are retained under tests/legacy_v1 and not counted as passed. Windows desktop installation remains unvalidated and binaries unsigned.

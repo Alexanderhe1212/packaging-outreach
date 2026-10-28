@@ -1,123 +1,45 @@
-# OutreachPilot · AI 外贸开发信工作台
+# User Radar + OutreachPilot
 
-找真实品牌 → 读官网拿公开邮箱和主推产品 → 一次调用写出个性化邮件 + A/B 方案 → 用真实产品图生成效果图 → 多个邮箱按节奏自动发送 → 自动识别回复、退订、退信。
+外贸包装客户研究与图文开发信工作台。User Radar 查询官网公开产品、联系人和邮箱；OutreachPilot 核实、保存、准备文案与包装概念图、按账号规则发送并处理回复。
 
-**一个程序同时跑多个发信账号，双击就能用，填一个 API Key 就能跑。** 纯 Python 标准库，不需要安装任何依赖；macOS / Windows / Linux 都能运行。
+## 当前状态
 
-## v1.0：重写，token 用量降一个数量级
+这是公开源码，不包含开发者的账号、API Key、客户数据库、邮件历史或运行配置。用户必须配置自己的模型服务、发件邮箱和真实公司资料。邮箱核实不等于采购意向，SMTP 接受不等于送达。
 
-| | 旧流程（v0.x / Codex） | v1.0 |
-|---|---|---|
-| 每个客户的 AI 调用 | 研究 + 独立核验 + 草稿 + 概念 ≈ 4 次 `codex exec`，每次预留 4 万 token | 写作 1 次 + 生图 1 次；找客户每 6 家才 1 次 |
-| 邮箱、产品、价格、产品图 | 让模型联网读、再让模型核验 | **直接抓官网，0 token**（Shopify products.json / JSON-LD / og 标签） |
-| 产品图给模型看 | 原图 | 512px 低精度（约 85–350 token） |
-| 提示词 | 每次约 1 万字符、每客户不同 | 固定的系统提示放最前面，可被服务商缓存 |
-| 多账号 | 每个品牌复制一整套代码 | 一套代码，任意多个账号，共享去重名单 |
-| 接口 | 只有 Codex 登录 | OpenAI / Claude / Gemini / DeepSeek / 通义 / Kimi / 智谱 / OpenRouter / 任意中转 / 本机 Codex |
-| 成本可见 | 无 | 每封邮件真实 token 和估算费用显示在界面上 |
+Windows x64 自带 Python 的 NSIS 安装器已在本机构建；源代码和构建脚本在 `distribution/windows/`。**目前未签名、未完成真实 Windows 安装/启动/卸载验收**。本仓库没有承诺未知平台功能可用，也没有将本机测试视为 Windows 安装验收。Mac 的 launchd 调度、原生总控以及可选 Codex/浏览器集成不属于当前 Windows 已验收范围。
 
-## 一句话开工（终端、Codex、Claude Code 都一样）
+## 从源码运行
 
-```bash
-outreach go        # 开工：自动启动后台、开始所有账号、报告状态（也可以写 outreach 开工）
-outreach status    # 状态
-outreach replies   # 最近的客户回复
-outreach stop      # 收工
+需要 Python 3.12 或更新兼容版本；先建立独立虚拟环境，然后：
+
+```sh
+python -m pip install -r requirements.txt
+python app.py
 ```
-在 Codex 或 Claude Code 里直接说「开工」「看看开发信状态」「有人回复吗」即可（安装时自动装好 Skill）。
 
-**没有 API Key？** 在 ⚙ 设置 → AI 接口 选「本机 Codex（ChatGPT 订阅）」，三个阶段（含生图）都能用 Codex 完成。程序给 Codex 用一个精简的独立目录（只共享登录），不加载你的插件、Skill 和全局配置：每次调用的固定开销从约 2.6 万 token 降到约 4,700。
+工作台只监听本机 `127.0.0.1:18800`。官网研究页可另运行 `python userradar/app.py`，监听 `127.0.0.1:18830`。首次配置自己的模型连接、SMTP/IMAP、签名和产品方案，先人工审核，再明确开始发送。官网研究结果可以通过工作台“添加客户”手动交接网址。
 
-## 安装
+Windows 自带运行环境安装器的构建、限制和依赖来源详见 [构建说明](distribution/windows/BUILD.md) 和 [使用说明](distribution/windows/安装版使用说明书.md)。客户安装 EXE 无需自行安装 Python。安装版使用独立数据目录，每次启动先暂停账号，卸载保留业务数据。
 
-```bash
-git clone https://github.com/Alexanderhe1212/packaging-outreach "$HOME/Outsearch Pilot"
-cd "$HOME/Outsearch Pilot"
-python3 app.py                       # 启动并打开窗口
-bash scripts/install_mac_app.sh      # macOS：桌面 Outsearch Pilot.app + 全局 outreach 命令 + Codex/Claude Skill
+## 不可取消的发送保护
+
+- 图片必须通过检查，无图或图片不合格不得发送。
+- 已发送、已回复、退订、退信及未知发送结果不得重复发送；跨账号去重，已固定归属不变。
+- 不从邮箱前缀猜姓名。具名与邮箱关联需有证据，公共邮箱不算具名采购人。
+- 产品观察与包装方案应有依据；不把材料包画成成品，不把套装画成单件。
+- 保留账号暂停、限额、冷却与原有发送前检查；不得清除历史绕过保护。
+- 来源限流尊重 Retry-After，有上限地重试；不绕过网站访问限制。
+
+## 验证
+
+```sh
+python -m unittest discover -s tests -v
+python -m unittest discover -s distribution/windows/tests -v
+python -m outreach.dryrun --count 20
 ```
-Windows 双击 `start.bat`；Linux 运行 `./start.sh`。
 
-## 三步开始
+测试使用虚构数据和本地 mock，不发送真实邮件或调用外部模型。`tests/legacy_v1` 保留旧公开版本的历史契约，未列为当前已通过测试。当前公开测试是经过隐私审查的合成子集；内部历史测试、客户专用夹具和运维记录不发布。GitHub Actions 的实际结果才代表对应 runner 的验证，不等于桌面安装器验收。
 
-1. **⚙ 设置 → AI 接口**：选服务商，粘贴 API Key，点「测试连接」。三个阶段（找客户 / 写邮件 / 效果图）可以用不同的服务商，例如 DeepSeek 写信 + OpenAI 生图。效果图需要能生图的连接（OpenAI 或支持 gpt-image 的中转）。
-2. **⚙ 设置 → 账号**：填发件邮箱、选邮箱服务商（腾讯企业邮 / 阿里 / 网易 / Gmail / Outlook / Zoho），填授权码，点「测试邮箱登录」。签名文字和签名图片也在这里。
-3. 点 **▶ 全部开始**。想先看再发：账号里把发送方式改成「人工审核后发送」。
+## 开源与隐私
 
-## 日常
-
-- **添加客户**：粘贴一批官网或邮箱，系统自动读官网、写信、生图。
-- **列表**：点任意客户看邮件预览，可以立即发送、修改文字、重做图片、重写、跳过。
-- **已回复**：客户回复原文直接显示，这些客户自动停止开发。
-- **跟进**（默认关闭）：未回复的客户 N 天后在同一封邮件线程里自动跟进一次，用模板，不花 token。
-- **⏻ 退出**：关掉后台服务；下次打开从原处继续（准备一半的客户会接着做）。
-
-## 邮箱空间不够？本地存档
-
-- 每封发出的邮件（.eml）和效果图、每封客户回复（含附件）都会自动存到本机，按 `账号/sent|replies/年-月/日期_客户.eml` 命名，Finder 可直接搜索。
-- 客户回信时：在程序里点开客户，回复原文、当时发出的邮件和效果图都在一起；命令行用 `outreach find 客户域名或邮箱`。
-- **⚙ 设置 → 账号 → 邮箱空间**：开启「自动存档并清理」后，每天把服务器上超过 N 天的邮件（可选 已发送 / 已删除 / 垃圾邮件 / 收件箱）完整下载到本地，核对文件写好后才从服务器删除。「预览可释放空间」只统计不删除。
-- 邮件本身也瘦身了：效果图 1280px、签名图 760px，单封约 400 KB。
-
-## 卖别的产品
-
-产品方案决定"卖什么、找谁、怎么写、怎么画"，在 `profiles/` 里：`packaging.json`（包装）、`display-stands.json`（陈列架示例）。在 **⚙ 设置 → 产品方案** 里「另存为新方案」，改掉介绍、目标客户、方案库和生图模板，再在账号里选用即可。
-
-## 发送保护
-
-- 每个账号每日上限、两封之间随机间隔、北京时间发送时段
-- 只用客户官网上公开的邮箱；免费邮箱必须包含品牌名才会使用
-- 账号品牌资料完全分开、独立工作；共享滚动 7×24 小时联系冷却，同一公司跨账号仍受保护
-- 回复、退订、退信、结果未知的地址不再发送；盒型会避开该账号最近用过的结构
-- SMTP 发出后结果未知不会自动重发；SMTP 250 只代表服务器接受
-- API Key 失效、额度用完、邮箱密码错误时该账号自动暂停并显示原因
-- 某一家失败就跳过换下一家，不会卡住
-
-## 命令行与 Agent
-
-```bash
-python3 app.py status | start [账号] | pause [账号] | add 账号 网址... | usage | quit
-python3 scripts/install_skill.py     # 安装 Skill 到 Claude Code 和 Codex
-```
-所有界面操作都有对应的本机 JSON API（见 `skills/outreach-pilot/SKILL.md`），其他 Agent 可以直接调用。
-
-## 数据与更新
-
-- 设置、密钥、数据库、效果图、已发邮件 .eml 都在 `~/Library/Application Support/OutreachPilot`（Windows/Linux：`~/.outreach-pilot`），不在代码目录，不会进 Git。密钥文件权限 600。
-- **⚙ 设置 → 数据与更新 → 检查更新**：从本仓库拉取新版本并自动重启；数据不受影响。
-- 从旧系统迁移：`settings.json` 的 `legacy.databases` 指向旧版 `workflow.sqlite3`，首次启动只读导入已联系 / 回复 / 退订 / 退信名单；也可以在界面导入 CSV。
-
-## 开发
-
-```bash
-python3 -m unittest discover -s tests -v   # 离线端到端测试：假 AI 接口 + 假 Shopify 店 + 假 SMTP
-```
-结构：`outreach/llm.py` 统一 AI 接口 · `web.py` 官网抓取 · `pipeline.py` 找客户/写信/生图 · `worker.py` 每账号一个线程 · `mailer.py` SMTP/IMAP · `store.py` SQLite · `server.py` 本机 API · `ui/index.html` 界面。
-
-MIT License
-
-### Repair 1.3.1 (2026-10-14)
-
-Accounts now prepare independently. Candidate and company/email/domain claims are atomic. Every send path, including the UI button and follow-ups, uses the same paused-state, interval, quota, suppression and duplicate gate. A durable `sending` reservation precedes SMTP; interrupted reservations become `unknown` and are never automatically retried. Inbox suppression is shared across accounts. HTTP callers can identify `X-Outreach-Source: ui|cli|review-agent`; `/api/audit` exposes the latest bounded operational events (no message bodies or credentials). A source label is diagnostic metadata, not authenticated human identity.
-
-The desktop applet starts a background service and opens the browser without Terminal. Startup and service locks prevent duplicate processes. `launcher.log` and `app.log` are in the application data directory. The installer preserves a previous app in the local backup folder outside the Desktop. Opening the app does not start paused accounts or enable automatic sending.
-
-Search now requires an official public business/general contact, a named physical product and a product image. Fit inferences are distinguished from confirmed purchase intent. Generated concepts still require individual human/agent review before sending; budget or buying dates are not invented.
-
-See [macOS installation and recovery](docs/mac-install-recovery.md) for a clean install, private local backups, and safe recovery.
-
-### Current procurement profile
-
-The optional `packaging-current-projects` profile searches company + named project with current buyer evidence. Buyer-site quotes are checked before grading: A+ requires recent dated evidence, an open supplier/quote window and two stated requirements; A confirms demand but asks whether the window remains open. B/C and unverified agency/third-party authority remain in a backlog, excluded from preparation and sending. External opportunities need manual buyer/authority verification. Existing drafts without qualified evidence cannot be sent under this profile. No supplier ads, expired RFQs or product-launch-as-procurement claims. First contact is a short window/project question; concept images are disabled until a real project merits them. No-result searches back off to reduce token usage.
-
-Local account identities and contact details stay in private settings. The public profile is a reusable strategy template, not a customer list.
-
-### Rolling seven-day contact window (1.3.2)
-
-Set account and total `daily_limit`/`daily_limit_total` to **0** for no application daily cap; this is not a large substitute number and does not change provider limits. Existing sending intervals and review mode remain in effect.
-
-All account identities share a rolling 604800-second window since the latest accepted send, including follow-ups. At exactly seven days ordinary contact history becomes eligible again. Atomic reservations and normalized email/domain/company claims still prevent simultaneous duplicates. Queue preparation, immediate/API sends, retries and optional follow-ups use the same gate; SMTP transport rechecks suppression and pause state. Sent records are never cleared or overwritten to make a customer eligible.
-
-Eligible historical prospects get a new queued record using verified product facts and prior-message context. Current procurement evidence is rechecked without repeating the entire product crawl. Old message text cannot be reused unchanged. A failed evidence review is not repeatedly retried each worker cycle. Positive replies remain held for conversation review; unsubscribes, explicit refusals, hard bounces, unresolved unknown outcomes, customer pauses and future-contact commitments remain excluded. History without a reliable send timestamp requires review. The window alone never establishes current buying intent.
-
-Account start/pause API actions now record time and diagnostic request source. Source labels are not authenticated proof of a human actor.
+本项目自有代码沿用 MIT License。第三方目录保留上游授权，**不统一改标 MIT**，见 [第三方说明](THIRD_PARTY_NOTICES.md)。打包依赖同时保留其许可证。请勿提交密钥、邮箱配置、客户资料、运行日志或真实邮件。源码开源与托管后台服务是两回事；安装后在用户本机运行。

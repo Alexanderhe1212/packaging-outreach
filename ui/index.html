@@ -110,7 +110,7 @@ main{max-width:1120px}.lead-table{table-layout:fixed;font-size:13px}.lead-table 
 </style>
 <style id="workspace-style">
 :root{--bg:#f5f7f4;--line:#e2e9e5;--text:#18332f;--muted:#71827c;--primary:#147567}body{background:#f5f7f4;color:#18332f;font:14px/1.55 -apple-system,BlinkMacSystemFont,system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:26px 28px}.card{border:1px solid #e2e9e5;border-radius:14px;box-shadow:0 3px 15px #18332f04}button,input,select{font:inherit;border-radius:8px}button{min-height:34px}button.primary{background:#147567;border-color:#147567}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #71b9a9;outline-offset:3px}.compact-view>header{display:none}.workspace-heading{margin-bottom:22px}.workspace-heading h1{font-size:26px;letter-spacing:-.7px;margin:0 0 6px}.workspace-heading p{font-size:13px;color:#71827c;margin:0}.compact-view #freshness{font-size:11px;margin-bottom:12px}.compact-view #listNotice:empty{display:none}.compact-view #listNotice{font-size:11px;min-height:0!important;margin:8px 0}.tabs{flex-wrap:wrap;gap:4px}.tabs button{border:0;background:transparent;color:#71827c}.tabs button.on{background:#e8f3ed;color:#147567;font-weight:600}.lead-table{table-layout:fixed}.lead-table th{font-size:11px;font-weight:600;letter-spacing:.2px;background:#fafcf9}.lead-table th,.lead-table td{padding:13px 14px}.lead-table th:nth-child(1){width:30%}.lead-table th:nth-child(2){width:34%}.lead-table th:nth-child(3){width:23%}.lead-table th:nth-child(4){width:13%}.lead-table td{font-size:13px;overflow-wrap:anywhere}.lead-table td small{font-size:11px}.lead-table tr:hover{background:#f4f8f5}.drawer{width:min(760px,100%);box-shadow:-15px 0 50px #18332f18}.dhead{padding:20px;border-bottom:1px solid #e2e9e5}.dbody{padding:20px}.dbody iframe{border:1px solid #e2e9e5;border-radius:12px;width:100%;min-height:380px}.lead-facts{margin-top:20px;padding:14px;border:1px solid #e2e9e5;border-radius:10px}.lead-facts summary{cursor:pointer;color:#147567;font-weight:600}.concept-preview{width:100%;height:auto;border-radius:12px;border:1px solid #e2e9e5;margin-bottom:16px}.empty{padding:36px 20px;color:#71827c}.row select,.row input{min-width:0;max-width:100%}@media(max-width:650px){main{padding:20px 14px}.lead-table th:nth-child(4),.lead-table td:nth-child(4){display:none}.lead-table th:nth-child(1){width:35%}.lead-table th:nth-child(2){width:35%}.lead-table th:nth-child(3){width:30%}.lead-table th,.lead-table td{padding:10px 8px}.workspace-heading h1{font-size:23px}.compact-view #fq{max-width:150px}}
-</style></head>
+</style><link rel="stylesheet" href="http://127.0.0.1:18800/workspace.css"></head>
 <body>
 <header>
   <div class="logo"><i>✈</i>OutreachPilot <span class="ver" id="ver"></span></div>
@@ -122,7 +122,7 @@ main{max-width:1120px}.lead-table{table-layout:fixed;font-size:13px}.lead-table 
   <button onclick="openSettings()">⚙ 设置</button>
   <button class="ghost" title="退出后台服务" onclick="quitApp()">⏻</button>
 </header>
-<main>
+<main><a href="/funnel" style="display:inline-block;margin-bottom:14px">客户开发漏斗与询盘 →</a>
   <div id="freshness" class="hint" role="status" aria-live="polite">正在读取后台状态…</div>
   <div id="banner" role="alert"></div>
   <p class="hint">开始会按各账号设置自动准备并发送；SMTP 已接受不等于送达。未知发送结果需核实，禁止盲目重发。</p>
@@ -312,7 +312,7 @@ async function openLead(id){
   const reps=(l.data||{}).replies||[],files=(l.data||{}).files||[];
   const repHtml=reps.length?reps.map(r=>`<div class="reply"><b>客户回复</b> <span class="muted">${new Date(r.at*1000).toLocaleString()}</span> · ${fileLink(r.file,'打开原邮件（含附件）')}\n${E(r.excerpt)}</div>`).join(''):(l.reply_excerpt?`<div class="reply"><b>客户回复：</b>\n${E(l.reply_excerpt)}</div>`:'');
   const fileHtml=(files.length||l.has_image)?`<div class="row" style="margin-bottom:10px;font-size:13px"><span class="muted">本地存档：</span>${files.map(f=>fileLink(f,f.includes('followup')?'跟进邮件 .eml':'当时发出的邮件 .eml')).join(' · ')}${l.has_image?`${files.length?' · ':''}<a href="/image/${id}" target="_blank">效果图大图</a>`:''}</div>`:'';
-  $('#dbody').innerHTML=`${l.status==='replied'?'<div class="reply"><b>回复处理待办</b><p>先查看下方回复与原邮件，区分人工回复、自动回复和有效需求，再决定如何答复。此处记录表示收到回复，尚不代表已核实或已处理；系统会阻止继续自动开发信。</p></div>':''}${l.status==='failed'?'<p class="hint">失败不代表永久不能联系。重新核验会读取官网、校正邮箱并重新准备邮件；账号运行且开启自动发送时，核验通过后继续发送。退订、退信、已回复和结果未知的邮件不可强制重发。</p>':''}${repHtml}${fileHtml}
+  $('#dbody').innerHTML=`${l.status==='replied'?'<div class="reply"><b>回复处理待办</b><p>先查看下方回复与原邮件，区分人工回复、自动回复和有效需求，再决定如何答复。此处记录表示收到回复，尚不代表已核实或已处理；系统会阻止继续自动开发信。</p></div>':''}${l.status==='failed'?'<p class="hint">失败不代表永久不能联系。重新核验会读取官网、校正邮箱并重新准备邮件；账号运行且开启自动发送时，核验通过后继续发送。退订、退信、已回复和结果未知的邮件不可强制重发。</p>':''}${repHtml}${fileHtml}<section aria-label="四维核实状态">${Object.entries(l.dimensions||{}).map(([k,v])=>`<p><span>${E(k)}</span>：<span>${E(v.status)}</span> <small>${E(v.reason_code)}</small></p>`).join('')}</section>
     <div class="row" style="margin-bottom:12px">${canSend?`<button class="primary" onclick="leadAct('send',${id})">✉ 立即发送</button>`:''}
     ${!locked&&l.subject?`<button onclick="editLead(${id})">✎ 修改文字</button>`:''}${!locked&&plan.a?`<button onclick="leadAct('redo',${id},'image')">↻ 重做图片</button>`:''}
     ${!locked?`<button onclick="leadAct('redo',${id},'${l.status==='failed'?'research':'all'}')">↻ ${l.status==='failed'?'重新核验并重试':'重新生成邮件'}</button>`:''}${!['sent','sending','unknown','bounced','unsubscribed','replied','skipped'].includes(l.status)?`<button class="danger" onclick="leadAct('skip',${id})">跳过</button>`:''}</div>
@@ -333,7 +333,7 @@ async function doAdd(){try{const r=await api('/api/add',{account:$('#addAcc').va
   toast(`已添加 ${r.ids.length} 家`+(r.skipped.length?`，跳过已联系 ${r.skipped.length} 家`:''),4000);$('#addUrls').value='';$('#addEmail').value='';closeModal('addModal');loadLeads(true)}catch(e){toast(e.message)}}
 
 /* ---------------- settings ---------------- */
-const STABS=[['acc','Accounts / 账号'],['prof','Products & Copy / 产品与文案'],['api','AI Connections / AI 接口'],['data','Data & Updates / 数据与更新']];
+const STABS=[['acc','账号'],['prof','产品与文案'],['api','AI 接口'],['data','数据与更新']];
 async function openSettings(tab){S.settings=await api('/api/settings');S.keys={};S.pw={};if(tab)S.stab=tab;$('#setModal').classList.add('open');renderSettings()}
 function renderSettings(){
   $('#stabs').innerHTML=STABS.map(([k,l])=>`<button class="${S.stab===k?'on':''}" onclick="collect();S.stab='${k}';renderSettings()">${l}</button>`).join('');
@@ -373,7 +373,7 @@ function renderAcc(){
   const st=S.settings,M=st.mail_presets,profs=st.profiles;
   let h=`<p class="hint" style="margin-top:0">每个账号独立准备和发信；发送统一检查间隔、额度及退订名单。</p>
    <div class="form" style="margin-bottom:14px"><label>所有账号合计每日上限（封，0 = 不限）<input type="number" min="0" id="totalLimit" value="${st.daily_limit_total||0}"></label>
-   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" checked disabled> 允许再次联系历史客户；防止同时重复发送，退订、拒绝、退信及未知结果继续排除</label></div>`;
+   <label class="chk" style="align-self:end"><input type="checkbox" id="crossLock" checked disabled> 已发送不重复发送；退订、已回复、退信及未知结果继续排除</label></div>`;
   h+=st.accounts.map((a,i)=>`<fieldset><legend>${E(a.name||a.id||'新账号')}</legend><div class="form">
    ${ACC_FIELDS.map(([k,l])=>`<label>${l}<input data-a="${i}" data-k="${k}" value="${E(a[k]||'')}"></label>`).join('')}
    <label>邮箱服务商<select onchange="mailPreset(${i},this.value)"><option value="">自定义…</option>${Object.entries(M).map(([k,m])=>opt(k,m.label,a.smtp&&a.smtp.host===m.smtp.host?k:'')).join('')}</select></label>
@@ -403,11 +403,12 @@ function renderAcc(){
      ${[['sent','已发送'],['trash','已删除'],['junk','垃圾邮件'],['inbox','收件箱']].map(([k,l])=>`<label class="chk"><input type="checkbox" data-arch="${i}" value="${k}" ${((a.mail_archive||{}).folders||['sent','trash']).includes(k)?'checked':''}> ${l}</label>`).join('')}</div>
     <div class="row" style="margin-top:8px"><button class="small" onclick="mailboxInfo('${a.id}')">查看邮箱用量</button><button class="small" onclick="archiveNow('${a.id}',true)">预览可释放空间</button><button class="small" onclick="archiveNow('${a.id}',false)">立即存档并清理</button><button class="small" onclick="api('/api/open-folder',{account:'${a.id}',kind:'archive'})">打开本地存档</button><button class="small" onclick="api('/api/open-folder',{account:'${a.id}',kind:'sent'})">打开已发邮件</button></div>
     <div class="hint" id="ar_${a.id}" style="margin-top:6px;white-space:pre-wrap"></div></div>
-   <div class="row wide"><button class="small" onclick="testMail('${a.id}')">测试邮箱登录</button><span class="hint" id="m_${a.id}"></span><div class="spacer"></div><button class="small danger" onclick="delAcc(${i})">删除账号</button></div>
+   <div class="row wide"><button class="small" onclick="testMail('${a.id}')">测试邮箱登录</button><button class="small" onclick="checkDns('${a.id}')">SPF / DKIM / DMARC 自检</button><span class="hint" id="m_${a.id}"></span><div class="spacer"></div><button class="small danger" onclick="delAcc(${i})">删除账号</button></div>
   </div></fieldset>`).join('');
   h+=`<button class="small" onclick="addAcc()">＋ 添加账号</button>`;
   $('#sbody').innerHTML=h;
 }
+async function checkDns(id){const t=$('#m_'+id);t.textContent='检查 DNS 记录…';try{const r=await api('/api/dns-check',{account:id});t.textContent=JSON.stringify(r)}catch(e){t.textContent=e.message}}
 async function mailboxInfo(id){const t=$('#ar_'+id);t.textContent='读取邮箱中…';try{const r=await api('/api/mailbox?refresh=1&account='+id);
   t.textContent=(r.limit?`已用 ${GB(r.used)} / ${GB(r.limit)}\n`:'')+r.folders.slice(0,8).map(f=>`${f.name}：${f.messages} 封，${GB(f.bytes)}`).join('\n')}catch(e){t.textContent='✗ '+e.message}}
 async function archiveNow(id,dry){collect();const a=S.settings.accounts.find(x=>x.id===id),cfg=a.mail_archive||{};

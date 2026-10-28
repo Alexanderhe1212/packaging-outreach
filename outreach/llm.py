@@ -54,11 +54,15 @@ def _error_message(text):
 
 def http_json(url, body, headers, timeout=300, attempts=3, content_type='application/json'):
     last = None
+    deadline = time.monotonic() + timeout
     for n in range(attempts):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         h = dict(headers, **{'Content-Type': content_type, 'Accept': 'application/json'})
         req = urllib.request.Request(url, data=body, method='POST', headers=h)
         try:
-            with urllib.request.urlopen(req, timeout=timeout, context=_ctx()) as r:
+            with urllib.request.urlopen(req, timeout=remaining, context=_ctx()) as r:
                 return json.loads(r.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
             text = e.read().decode('utf-8', 'replace')[:1500]
@@ -66,15 +70,21 @@ def http_json(url, body, headers, timeout=300, attempts=3, content_type='applica
             low = text.lower()
             if e.code in (401, 403) or 'insufficient_quota' in low or 'billing' in low or 'credit balance' in low:
                 raise AIError('API 鉴权或额度问题：' + msg, e.code, fatal=True)
+            if e.code == 429:
+                # Let the queue wait; do not hold a worker in repeated requests.
+                from .web import retry_after
+                error = AIError(msg, e.code)
+                error.retry_at = time.time() + max(300, retry_after(e))
+                raise error
             if e.code in (408, 409, 429, 500, 502, 503, 504, 520, 522, 524, 529) and n < attempts - 1:
-                time.sleep(4 * (n + 1) ** 2)
+                time.sleep(min(4 * (n + 1) ** 2, max(0,deadline-time.monotonic())))
                 last = AIError(msg, e.code)
                 continue
             raise AIError(msg, e.code)
         except (urllib.error.URLError, TimeoutError, ConnectionError, ssl.SSLError, OSError) as e:
             last = AIError('网络错误：%s' % getattr(e, 'reason', e))
             if n < attempts - 1:
-                time.sleep(5 * (n + 1))
+                time.sleep(min(5 * (n + 1), max(0,deadline-time.monotonic())))
     raise last or AIError('API 请求失败')
 
 
@@ -155,7 +165,7 @@ class Stage:
         self.conn = connection_info(self.opts.get('connection', 'main'), cfg)
         self.kind = self.conn['kind']
         self.model = (self.opts.get('model') or '').strip()
-        self.timeout = float(self.opts.get('timeout', 300))
+        self.timeout = float(self.opts.get('timeout') or (120 if stage in ('discover','write') else 300))
         if not self.model and self.kind != 'codex':
             raise AIError('阶段 %s 没有设置模型' % stage, fatal=True, setup=True)
         if self.kind != 'codex' and not self.conn['key'] and not self.conn['preset_info'].get('nokey'):
@@ -186,6 +196,8 @@ class Stage:
         return extract_json(text)
 
     def text(self, system, user, image=None, search=False, max_tokens=4000, want_json=False):
+        if isinstance(image, (list, tuple)) and (not self.opts.get('vision', True) or 'vision' in self._bad):
+            raise AIError('Reference image comparison requires vision; review blocked')
         search = search and self.can_search
         if self.kind == 'anthropic':
             return self._anthropic(system, user, image, search, max_tokens)
@@ -218,9 +230,9 @@ class Stage:
         use_image = image is not None and self.opts.get('vision', True) and 'vision' not in self._bad
         content = user
         if use_image:
-            content = [{'type': 'text', 'text': user},
-                       {'type': 'image_url', 'image_url': {'url': 'data:%s;base64,%s' % (mime(image), base64.b64encode(image).decode()),
-                                                           'detail': 'low'}}]
+            content = [{'type': 'text', 'text': user}]
+            for raw in (image if isinstance(image, (list, tuple)) else [image]):
+                content.append({'type':'image_url','image_url':{'url':'data:%s;base64,%s' % (mime(raw),base64.b64encode(raw).decode()),'detail':'high' if isinstance(image,(list,tuple)) else 'low'}})
         payload = dict(model=model, messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': content}], **extra)
         optional = []
         if want_json and 'response_format' not in self._bad:
@@ -241,6 +253,8 @@ class Stage:
                     raise
                 msg = str(e).lower()
                 if use_image and any(w in msg for w in ('image', 'vision', 'multimodal', 'content type', 'image_url')):
+                    if isinstance(image, (list, tuple)):
+                        raise  # Never approve a reference comparison without its images.
                     self._bad.add('vision')
                     payload['messages'][1]['content'] = user
                     use_image = False
@@ -262,8 +276,8 @@ class Stage:
     def _responses(self, system, user, image):
         content = [{'type': 'input_text', 'text': user}]
         if image is not None and self.opts.get('vision', True):
-            content.append({'type': 'input_image', 'image_url': 'data:%s;base64,%s' % (mime(image), base64.b64encode(image).decode()),
-                            'detail': 'low'})
+            for raw in (image if isinstance(image, (list, tuple)) else [image]):
+                content.append({'type':'input_image','image_url':'data:%s;base64,%s' % (mime(raw),base64.b64encode(raw).decode()),'detail':'high' if isinstance(image,(list,tuple)) else 'low'})
         payload = {'model': self.model, 'instructions': system, 'input': [{'role': 'user', 'content': content}],
                    'tools': [{'type': 'web_search'}]}
         if self.opts.get('effort') and 'reasoning_effort' not in self._bad:
@@ -296,8 +310,8 @@ class Stage:
         headers = {'x-api-key': self.conn['key'], 'anthropic-version': '2023-06-01'}
         content = []
         if image is not None and self.opts.get('vision', True):
-            content.append({'type': 'image', 'source': {'type': 'base64', 'media_type': mime(image),
-                                                         'data': base64.b64encode(image).decode()}})
+            for raw in (image if isinstance(image, (list, tuple)) else [image]):
+                content.append({'type':'image','source':{'type':'base64','media_type':mime(raw),'data':base64.b64encode(raw).decode()}})
         content.append({'type': 'text', 'text': user})
         payload = {'model': self.model, 'max_tokens': max_tokens,
                    'system': [{'type': 'text', 'text': system, 'cache_control': {'type': 'ephemeral'}}],
@@ -332,6 +346,8 @@ class Stage:
                     self._bad.add('search_v1')
                     payload['tools'][0]['type'] = tool_types[1]
                 elif image is not None and 'image' in msg and content[0].get('type') == 'image':
+                    if isinstance(image,(list,tuple)):
+                        raise
                     content.pop(0)
                 else:
                     raise
@@ -465,7 +481,7 @@ class Stage:
             return text, thread, began
 
     def _codex(self, system, user, image, search):
-        images = [image] if image is not None and self.opts.get('vision', True) else []
+        images = (list(image) if isinstance(image,(list,tuple)) else [image]) if image is not None and self.opts.get('vision', True) else []
         text, _, _ = self._codex_run(system + '\n\n' + user, images, search=search)
         return text
 

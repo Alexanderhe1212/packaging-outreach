@@ -19,3 +19,21 @@ settings.json
 secrets.json
 *.jpg
 !ui/*.jpg
+
+# Private runtime and local build artifacts
+*.eml
+*.mbox
+*.log
+*.sqlite*
+*.db-*
+*.exe
+*.zip
+*.whl
+__pycache__/
+payload/
+extracted/
+source-export/
+research-runs/
+settings.json
+secrets.json
+.env*

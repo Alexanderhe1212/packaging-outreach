@@ -67,7 +67,7 @@ def api_state(_q):
     conns = cfg['connections']
     ready = all(sec['keys'].get(s.get('connection')) or conns.get(s.get('connection'), {}).get('preset') == 'codex'
                 for s in cfg['stages'].values())
-    return dict(version=VERSION, build="operations-20261016", server_time=time.time(), cooldown_seconds=store.CONTACT_COOLDOWN_SECONDS, accounts=accounts, api_ready=ready, daily_limit_total=int(cfg.get('daily_limit_total') or 0), legacy=store.get('legacy_imported'),
+    return dict(version=VERSION, build="pipeline-refactor-20261023", server_time=time.time(), cooldown_seconds=store.CONTACT_COOLDOWN_SECONDS, accounts=accounts, api_ready=ready, daily_limit_total=int(cfg.get('daily_limit_total') or 0), legacy=store.get('legacy_imported'),
                 data_dir=str(config.data_dir()), legacy_running=legacy_running(cfg.get('legacy', {}).get('ports', [])))
 
 
@@ -173,6 +173,8 @@ def api_redo(data):
         raise ValueError('当前状态不能重做')
     if lead.get('sent_at') or lead.get('message_id') or store.hard_blocked(lead.get('email',''), lead['account']):
         raise ValueError('已有发送记录或客户已抑制，不可重复发送')
+    if data.get('what') == 'problem':
+        data = dict(data, what=problems.retry_action(lead))
     d = lead['data']
     if data.get('what') == 'rate_limit':
         reason=lead.get('error','')
@@ -190,11 +192,17 @@ def api_redo(data):
         d.pop('prospect',None)
     if data.get('what') == 'research':
         d.setdefault('retry_history', []).append(dict(at=time.time(), error=lead.get('error',''), email=lead.get('email','')))
+        # Explicit recheck starts a fresh bounded budget, keeping Retry-After.
+        for key in ('research_retry_count','ai_retry_count','retry_exhausted','retry_kind'):
+            d.pop(key,None)
         d.pop('prospect', None)
         # Keep original Radar evidence; re-discover the actual public mailbox instead of reusing a bad hint.
         d.setdefault('manual', {})['email'] = ''
         d['manual']['email_recheck']=True
         d['manual'].setdefault('url', lead.get('domain',''))
+        contact=d['manual'].get('radar') or {}
+        if contact.get('website') and d['manual']['url']==contact.get('fit_source'):
+            d['manual']['url']=radar.research_url(contact)
     d.pop('image_prompt', None)
     if data.get('what') != 'image':
         d.pop('plan', None)
@@ -312,10 +320,21 @@ def api_quit(_data):
 
 GET = {'/api/crawl-retries': lambda qs: {'items': store.q("SELECT c.account,c.domain,c.status,c.reason,r.attempts,r.next_at FROM candidates c JOIN crawl_retries r ON c.domain=r.domain WHERE c.account=? AND c.status IN ('retry_wait','retry_exhausted') ORDER BY r.next_at LIMIT 50", (qs.get('account',[''])[0],))}, '/api/operations': lambda qs: store.operation_report(int(qs.get('days',['7'])[0])), '/api/audit': lambda qs: {'items': store.q('SELECT * FROM audit ORDER BY id DESC LIMIT 100')}, '/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
        '/api/usage': lambda qs: store.usage_summary(int(qs.get('days', ['7'])[0])),
-       '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION, 'build': 'operations-20261016', 'instance_id': INSTANCE_ID, 'started_at': SERVICE_STARTED}}
+       '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION, 'build': 'pipeline-refactor-20261023', 'instance_id': INSTANCE_ID, 'started_at': SERVICE_STARTED}}
 GET['/api/radar']=radar.overview
 GET['/api/problems']=problems.overview
-POST = {'/api/radar/recheck-handoff': radar.recheck_handoff, '/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
+from . import funnel
+GET['/api/funnel']=funnel.report
+from pipeline_core import features as pipeline_features
+GET['/api/pipeline-features']=lambda _: {k:pipeline_features.enabled(k) for k in pipeline_features.DEFAULTS}
+
+def api_dns_check(data):
+    from .send_guard import dns_check
+    result=dns_check(config.account(data['account']))
+    store.put('dns_check_'+data['account'],result)
+    return result
+
+POST = {'/api/pipeline-features':lambda data:pipeline_features.update({k:v for k,v in data.items() if k!='_origin'}), '/api/dns-check':api_dns_check, '/api/radar/recheck-handoff': radar.recheck_handoff, '/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
         '/api/exhibition/prepare': exhibition.prepare, '/api/exhibition/approve': exhibition.approve, '/api/exhibition/revise': exhibition.revise,
         '/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
         '/api/send': api_send, '/api/skip': api_skip, '/api/edit': api_edit, '/api/redo': api_redo,
@@ -354,12 +373,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply({'error': 'local only'}, 403)
         u = urlsplit(self.path)
         try:
+            if u.path=='/funnel':
+                return self.reply((config.ROOT/'ui/funnel.html').read_bytes(),ctype='text/html; charset=utf-8')
             if u.path in ('/', '/index.html'):
                 return self.reply(UI.read_bytes(), ctype='text/html; charset=utf-8')
             if u.path == '/problems':
                 return self.reply((config.ROOT/'ui/problems.html').read_bytes(), ctype='text/html; charset=utf-8')
             if u.path == '/radar':
                 return self.reply((config.ROOT/'ui/radar.html').read_bytes(), ctype='text/html; charset=utf-8')
+            if u.path == '/workspace.css':
+                return self.reply((config.ROOT/'ui/workspace.css').read_bytes(), ctype='text/css; charset=utf-8')
             if u.path in GET:
                 return self.reply(GET[u.path](parse_qs(u.query)))
             if u.path.startswith('/api/lead/'):

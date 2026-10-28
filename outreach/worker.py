@@ -9,6 +9,55 @@ from pathlib import Path
 from . import archive, config, exhibition, llm, mailer, pipeline, recommendation, store, web
 
 
+def _legacy_defer_preparation(data, error, now=None):
+    """Schedule bounded preparation retries without consuming an SMTP attempt."""
+    now = time.time() if now is None else now
+    transient = web.transient_failure(error)
+    ai = isinstance(error, llm.AIError) and not error.fatal and not error.setup
+    if not transient and not ai:
+        return False
+    deferred = isinstance(transient, web.DeferredFetch)
+    rate_limited = isinstance(transient, web.urllib.error.HTTPError) and transient.code == 429
+    key = 'ai_retry_count' if ai else 'research_retry_count'
+    attempts = int(data.get(key, 0))
+    if not deferred and attempts >= (6 if rate_limited else 3):
+        data['retry_exhausted'] = True
+        return False
+    data[key] = attempts if deferred else attempts + 1
+    delay = 5 if deferred else min(300 * 2 ** min(attempts, 7), 21600)
+    until = max((vars(error if ai else transient).get('retry_at', 0) if ai or transient else 0) or 0,
+                now + (web.retry_after(transient) if transient else 0))
+    data['research_retry_at'] = max(float(data.get('research_retry_at') or 0), now + delay, until)
+    data['retry_kind'] = 'ai' if ai else 'rate_limit' if rate_limited or deferred else 'network'
+    data.pop('retry_exhausted', None)
+    return True
+
+
+def defer_preparation(data, error, now=None):
+    from pipeline_core import features, retry_policy
+    if not features.enabled('unified_retry'):
+        return _legacy_defer_preparation(data,error,now)
+    transient=web.transient_failure(error)
+    ai=isinstance(error,llm.AIError) and not error.fatal and not error.setup
+    if not transient and not ai:return False
+    key='ai_retry_count' if ai else 'research_retry_count'
+    try:
+        result=retry_policy.decide('NETWORK' if ai else transient,data.get(key,0),now=now,
+            deferred=isinstance(transient,web.DeferredFetch),
+            deadline=max(float(data.get('research_retry_at') or 0),
+                         float(vars(error).get('retry_at',0) or 0)))
+    except Exception:
+        return _legacy_defer_preparation(data,error,now)
+    data.update({k:result[k] for k in ('reason_code','retry_count','next_retry_at','last_error')})
+    if result['action']!='retry':
+        data['retry_exhausted']=result['reason_code']=='RETRY_EXHAUSTED'
+        return False
+    data[key]=result['retry_count'];data['research_retry_at']=result['next_retry_at']
+    data['retry_kind']='ai' if ai else 'rate_limit' if result['reason_code']=='RATE_LIMITED' or isinstance(transient,web.DeferredFetch) else 'network'
+    data.pop('retry_exhausted',None)
+    return True
+
+
 
 
 class AccountWorker(threading.Thread):
@@ -148,7 +197,11 @@ class AccountWorker(threading.Thread):
             due = self.followup_due(acc)
             if due:
                 return self.send_followup(due)
-        buffer = 2 if auto else 5
+        from pipeline_core import features
+        if features.enabled('auto_followup'):
+            from . import followups
+            if followups.prepare(acc,self.profile):return
+        buffer = max(1,min(20,int(features.option('ready_buffer_per_account',2 if auto else 5))))
         if store.count(self.id, 'ready') < buffer or store.next_lead(self.id, ('queued',)):
             return self.prepare_one()
         if not auto:
@@ -195,6 +248,9 @@ class AccountWorker(threading.Thread):
             return
         acc, prof = self.acc, self.profile
         lead = store.next_lead(self.id, ('queued',))
+        if lead is None:
+            from .radar import queue_second_contact
+            lead=queue_second_contact(self.id)
         radar_source=store.get('radar_source',{})
         if lead is None and radar_source.get('enabled') and self.id in (radar_source.get('accounts') or [radar_source.get('account')]):
             from . import radar
@@ -239,7 +295,7 @@ class AccountWorker(threading.Thread):
                 if web.root_domain(web.host(target))!=web.root_domain(cand['domain']):
                     raise web.CrawlError('候选商品来源跨品牌')
                 prospect, photo = pipeline.research(acc, target)
-            except (web.CrawlError, web.DeferredFetch) as e:
+            except (web.CrawlError, web.DeferredFetch, web.urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 if web.transient_failure(e):
                     store.defer_candidate(cand['domain'], e)
                 else:
@@ -270,11 +326,23 @@ class AccountWorker(threading.Thread):
         return self.process(lead, None)
 
     def process(self, lead, photo):
-        acc, prof, lid, d = self.acc, self.profile, lead['id'], lead['data']
+        acc, prof, lid, d = self.acc, dict(self.profile, image_optional=False), lead['id'], lead['data']
+        if (not d.get('prospect') and int(d.get('research_retry_count',0)) >= 6
+                and ('429' in lead.get('error','') or d.get('retry_kind')=='rate_limit')):
+            d['retry_exhausted'] = True
+            store.update(lid,status='failed',data=d,error='自动补查已达上限，待复核来源：'+lead.get('error','限流'))
+            return
         store.set_current_lead(lid)
         try:
-            if not d.get('prospect'):
-                manual = d.get('manual', {})
+            manual = d.get('manual', {})
+            cached = d.get('prospect') or {}
+            target = manual.get('url', '')
+            selected_path = web.urlsplit(target if '//' in target else '//' + target).path.strip('/')
+            # Old text fallbacks lost the selected page; refresh once before using their draft.
+            refresh_context = bool(cached and prof.get('inquiry_first') and not prof.get('require_abc')
+                                   and selected_path and not cached.get('site_description_source')
+                                   and not cached.get('product_url') and not cached.get('introduction_only'))
+            if not cached or refresh_context:
                 self.activity = '读取手动添加的客户：' + manual.get('url', '')
                 store.update(lid, status='researching', error='')
                 contact = dict(manual.get('radar') or {})
@@ -289,6 +357,8 @@ class AccountWorker(threading.Thread):
                         if contact and prof.get('inquiry_first') and not prof.get('require_abc') and str(error)=='官网业务未能核实包装匹配度':
                             d['prospect'], photo = recommendation.research(acc, contact)
                         else:raise
+                if refresh_context:
+                    d.pop('plan', None)
                 p = d['prospect']
                 if not store.claim_prospect(self.id,p,lid=lid):
                     store.update(lid,status='skipped',error='重复或已抑制客户')
@@ -323,6 +393,11 @@ class AccountWorker(threading.Thread):
                 store.update(lid, status='backlog', error='当前项目采购证据待核实；保留后备')
                 return
             name = p.get('customer_brand') or p['company']
+            if photo is None and p.get('product_asset'):
+                try:
+                    from pipeline_core.evidence import read_asset
+                    photo=read_asset(p['product_asset'])
+                except Exception:pass
             if photo is None and p.get('product_image_url') and prof.get('image',{}).get('enabled',True):
                 photo, _ = web.product_image(p['product_image_url'])
             if self.paused:
@@ -379,29 +454,26 @@ class AccountWorker(threading.Thread):
             store.update(lid,status='skipped',error=str(e),data=d)
             self.activity = '已筛除不匹配客户，继续下一家'
         except llm.AIError as e:
+            if defer_preparation(d, e):
+                store.update(lid, status='queued', error='AI 暂时不可用，已安排重试：'+str(e)[:220], data=d)
+                self.activity = 'AI 任务稍后重试；继续下一家'
+                return
             store.update(lid, status='queued' if e.fatal else 'failed', error=str(e)[:300], data=d)
             raise
         except (ValueError, web.CrawlError, web.DeferredFetch, web.urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            transient = web.transient_failure(e)
-            attempts = int(d.get('research_retry_count', 0))
-            deferred = isinstance(transient, web.DeferredFetch)
-            rate_limited = isinstance(transient, web.urllib.error.HTTPError) and transient.code == 429
-            if transient is not None and (deferred or rate_limited or attempts < 3):
-                # The local guard made no request; waiting cannot consume a fetch retry.
-                d['research_retry_count'] = attempts if deferred else attempts + 1
-                delay = max(5, web.retry_after(transient)) if deferred else max(min(300 * (2 ** min(attempts, 7)), 21600), web.retry_after(transient))
-                d['research_retry_at'] = time.time() + delay
+            if defer_preparation(d, e):
                 store.update(lid, status='queued', error='官网暂时不可用，延迟复核：' + str(e)[:220], data=d)
                 self.activity = '官网限流，稍后复核；继续下一家'
             else:
-                store.update(lid, status='failed', error=str(e)[:300], data=d)
+                prefix = '自动补查已达上限，待复核来源：' if d.get('retry_exhausted') else ''
+                store.update(lid, status='failed', error=prefix+str(e)[:250], data=d)
                 self.activity = '跳过：%s' % e
         except Exception as e:
             store.update(lid, status='failed', error='%s: %s' % (type(e).__name__, str(e)[:250]), data=d)
             raise
 
     # ----- send -----
-    def send(self, lead, manual=False, origin=None, followup=False):
+    def send(self, lead, manual=False, origin=None, followup=False, dry_run=False):
         # Account-local lock; another account can still search, generate or send.
         if not self.send_lock.acquire(blocking=False):
             store.audit('send_denied',self.id,lead['id'],origin,'sending')
@@ -434,8 +506,27 @@ class AccountWorker(threading.Thread):
             if lead['data'].get('prospect',{}).get('concept_ready') and lead['data'].get('plan',{}).get('c') and not img:
                 store.audit('send_denied',self.id,lead['id'],origin,'concept_image_missing')
                 return 'concept_image_missing'
+            p = lead['data'].get('prospect', {})
+            if not followup and p.get('recipient_identity_confirmed'):
+                expected_greeting = 'Hi ' + pipeline.recipient_label(p) + ','
+                if not str(lead.get('body') or '').lstrip().startswith(expected_greeting):
+                    if lead['status'] == 'ready' and not lead.get('sent_at') and not lead.get('message_id'):
+                        store.update(lead['id'], status='failed', error='已核实本人姓名但邮件称呼不一致，未发送；需重新生成')
+                    store.audit('send_denied', self.id, lead['id'], origin, 'recipient_greeting_mismatch')
+                    return 'recipient_greeting_mismatch'
+            if not img:
+                store.audit('send_denied',self.id,lead['id'],origin,'concept_image_missing')
+                return 'concept_image_missing'
             msg=mailer.build_followup(acc,lead,self.profile) if followup else mailer.build(acc,lead,img)
             origin=origin or {'source':'manual_internal' if manual else ('followup' if followup else 'scheduler')}
+            if dry_run:
+                reason=store._conflict(store.db(),lead)
+                result=reason or 'dry_run_ready'
+                store.event(lead['id'],'send_check',result,result.upper(),self.id)
+                return result
+            from .send_guard import check
+            guard_reason=check(acc,lead)
+            if guard_reason:return guard_reason
             token,reason=store.reserve_send(lead['id'],acc,str(msg['Message-ID']),origin,followup,expected=lead)
             if not token:
                 return reason
@@ -451,6 +542,8 @@ class AccountWorker(threading.Thread):
                 result,note='unknown','传输异常，需核实状态：'+type(e).__name__
             now=time.time();lo,hi=acc.get('send_interval_minutes',[4,9])
             next_at=now+random.uniform(float(lo),float(hi))*60
+            from pipeline_core import features
+            if features.enabled('send_guard'):next_at=max(next_at,now+random.uniform(90,300))
             store.finish_send(token,result,note,next_at)
             if result in ('sent','unknown'):
                 try:
@@ -468,6 +561,11 @@ class AccountWorker(threading.Thread):
 
     # ----- optional single follow-up, same thread, no AI tokens -----
     def followup_due(self, acc):
+        from pipeline_core import features
+        if features.enabled('auto_followup'):
+            from .followups import candidate
+            lead=candidate(self.id)
+            return lead if lead and (lead['data'].get('followup_ready') or {}).get('index')==lead['followups']+1 else None
         fu = self.profile.get('followup', {})
         enabled = acc.get('followup_enabled', fu.get('enabled', False))
         if not enabled:

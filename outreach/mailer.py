@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import time
 import uuid
+from pathlib import Path
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -196,7 +197,13 @@ def build_followup(acc, lead, profile):
     body = tpl.format(brand=p.get('customer_brand') or lead['company'], product=p.get('product_name') or 'your product',
                       contact=acc.get('contact_name', ''))
     subject = lead['subject'] if lead['subject'].lower().startswith('re:') else 'Re: ' + lead['subject']
-    msg = build(acc, dict(lead, subject=subject, body=body, message_id=''), None)
+    image=Path(lead['image']).read_bytes() if lead.get('image') else None
+    from pipeline_core import features
+    if features.enabled('auto_followup'):
+        prepared=lead['data'].get('followup_ready') or {}
+        if prepared.get('index')!=int(lead.get('followups') or 0)+1:raise ValueError('follow-up has not passed preparation')
+        body=prepared['body'];image=Path(prepared['image']).read_bytes()
+    msg = build(acc, dict(lead, subject=subject, body=body, message_id=''), image)
     msg['In-Reply-To'] = lead['message_id']
     msg['References'] = lead['message_id']
     return msg
@@ -220,6 +227,8 @@ def preview_html(acc, lead, image_bytes):
 # ---------------- send ----------------
 def send(acc, msg, before_data=None):
     """Returns (result, note); result is 'sent' | 'bounced' | 'unknown' | 'retry'. Never resends once DATA has started."""
+    if not any(p.get_content_maintype()=='image' and str(p.get('Content-ID','')).strip('<>')=='concept' and p.get_payload(decode=True) for p in msg.walk()):
+        return 'blocked', '效果图缺失，未连接 SMTP'
     rcpt = parseaddr(str(msg['To']))[1]
     stage, client = 'connect', None
     try:
@@ -360,14 +369,27 @@ def sync_inbox(acc):
                 body = raw.decode('utf-8', 'replace').lower()
                 for addr, lid in sent.items():
                     if addr in body:
+                        from .reply_classification import record
+                        record(aid,uid,lid,'bounce')
                         store.update(lid, status='bounced', error='退信: ' + subject[:120])
                         store.suppress(addr, 'bounce', aid, subject[:120])
                         found += 1
                 continue
-            if sender not in sent or AUTO_SUBJ.search(subject) or str(msg.get('Auto-Submitted', 'no')).lower() not in ('no', ''):
-                continue
+            if sender not in sent:continue
+            from pipeline_core import features
+            automatic=bool(AUTO_SUBJ.search(subject) or str(msg.get('Auto-Submitted','no')).lower() not in ('no',''))
             text = fresh_text(msg)
             lid = sent[sender]
+            if features.enabled('reply_classification'):
+                from .reply_classification import classify,record
+                kind='auto_reply' if automatic else classify(msg,text)
+                record(aid,uid,lid,kind,text)
+                if automatic:
+                    save_reply(aid,lid,raw,text)
+                    store.update(lid,reply_at=time.time(),reply_excerpt=text[:2000])
+                    store.suppress(sender,'auto_reply',aid,'Automatic reply; stop automatic follow-up')
+                    found+=1;continue
+            elif automatic:continue
             save_reply(aid, lid, raw, text)
             if any(w in text.lower()[:600] for w in STOP_WORDS):
                 store.update(lid, status='unsubscribed', reply_at=time.time(), reply_excerpt=text[:2000])

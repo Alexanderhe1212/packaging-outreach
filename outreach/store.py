@@ -47,6 +47,23 @@ CREATE INDEX IF NOT EXISTS stage_runs_account ON stage_runs(account,started);
 CREATE TABLE IF NOT EXISTS crawl_retries(domain TEXT PRIMARY KEY, attempts INTEGER DEFAULT 0, next_at REAL, reason TEXT);
 
 '''
+SCHEMA += """
+CREATE TABLE IF NOT EXISTS inbox_events(id INTEGER PRIMARY KEY,account TEXT,uid TEXT,lead_id INTEGER,classification TEXT,created_at REAL,UNIQUE(account,uid,lead_id));
+CREATE TABLE IF NOT EXISTS lead_events(id INTEGER PRIMARY KEY AUTOINCREMENT,
+ lead_id INTEGER,stage TEXT NOT NULL,status TEXT NOT NULL,reason_code TEXT NOT NULL,
+ duration_ms REAL,account TEXT,created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS lead_events_stage ON lead_events(stage,created_at);
+CREATE TRIGGER IF NOT EXISTS lead_insert_event AFTER INSERT ON leads BEGIN
+ INSERT INTO lead_events(lead_id,stage,status,reason_code,account,created_at)
+ VALUES(NEW.id,'lead',NEW.status,upper(NEW.status),NEW.account,NEW.created_at); END;
+CREATE TRIGGER IF NOT EXISTS lead_status_event AFTER UPDATE OF status ON leads WHEN OLD.status!=NEW.status BEGIN
+ INSERT INTO lead_events(lead_id,stage,status,reason_code,account,created_at)
+ VALUES(NEW.id,'lead',NEW.status,upper(NEW.status),NEW.account,coalesce(NEW.updated_at,strftime('%s','now'))); END;
+CREATE TRIGGER IF NOT EXISTS measured_stage_event AFTER UPDATE OF outcome ON stage_runs WHEN OLD.outcome!=NEW.outcome BEGIN
+ INSERT INTO lead_events(lead_id,stage,status,reason_code,duration_ms,account,created_at)
+ VALUES(NEW.lead,NEW.stage,NEW.outcome,coalesce(nullif(NEW.error_type,''),upper(NEW.outcome)),NEW.duration*1000,NEW.account,coalesce(NEW.finished,strftime('%s','now'))); END;
+"""
+
 ACTIVE = ('queued', 'researching', 'writing', 'imaging')
 CONTACTED = ('sent', 'unknown', 'replied', 'bounced', 'unsubscribed')
 _current_lead = threading.local()
@@ -60,6 +77,10 @@ def db():
             _conn.row_factory = sqlite3.Row
             _conn.execute('PRAGMA journal_mode=WAL')
             _conn.executescript(SCHEMA)
+            from pipeline_core.identity import schema,register
+            schema(_conn)
+            for row in _conn.execute('SELECT id,domain,account FROM leads ORDER BY id').fetchall():
+                if row['domain']:register(_conn,row['domain'],row['id'],row['account'])
             columns = {r[1] for r in _conn.execute('PRAGMA table_info(usage)')}
             if 'run_id' not in columns:
                 _conn.execute('ALTER TABLE usage ADD COLUMN run_id INTEGER')
@@ -108,6 +129,8 @@ def lead(lid):
     r = q('SELECT * FROM leads WHERE id=?', (lid,), one=True)
     if r:
         r['data'] = json.loads(r['data'] or '{}')
+        from .dimensions import describe
+        r['dimensions'] = describe(r)
     return r
 
 
@@ -119,11 +142,19 @@ def add_lead(account, status, source='auto', **f):
 
 
 def update(lid, **f):
+    previous=lead(lid)
     if 'data' in f:
         f['data'] = json.dumps(f['data'], ensure_ascii=False)
     f['updated_at'] = time.time()
     keys = list(f)
     x('UPDATE leads SET ' + ','.join(k + '=?' for k in keys) + ' WHERE id=?', [f[k] for k in keys] + [lid])
+    try:
+        current=lead(lid)
+        if current:
+            for stage,value in current['dimensions'].items():
+                if not previous or previous['dimensions'].get(stage)!=value:
+                    event(lid,stage,value['status'],value['reason_code'],current['account'])
+    except Exception:pass
     if f.get('status') in ('failed', 'unknown'):
         from . import problems
         problems.overview()
@@ -131,7 +162,9 @@ def update(lid, **f):
 
 def next_lead(account, statuses):
     marks = ','.join('?' for _ in statuses)
-    r = q("SELECT id FROM leads WHERE account=? AND status IN (" + marks + ") AND (status != 'queued' OR COALESCE(json_extract(data, '$.research_retry_at'), 0) <= ?) ORDER BY id LIMIT 1", [account] + list(statuses) + [time.time()], one=True)
+    from pipeline_core import features
+    ordering="COALESCE(json_extract(data,'$.manual.radar.priority_score.total'),json_extract(data,'$.prospect.priority_score.total'),0) DESC, id" if features.enabled('candidate_pool') else 'id'
+    r = q("SELECT id FROM leads WHERE account=? AND status IN (" + marks + ") AND (status != 'queued' OR COALESCE(json_extract(data, '$.research_retry_at'), 0) <= ?) ORDER BY "+ordering+" LIMIT 1", [account] + list(statuses) + [time.time()], one=True)
     return lead(r['id']) if r else None
 
 
@@ -163,6 +196,8 @@ def list_leads(account=None, status=None, limit=100, offset=0, search=''):
     items = q('SELECT id,account,status,source,company,domain,email,subject,error,cost,tokens,created_at,updated_at,sent_at,'
               "reply_at,followups,COALESCE(json_extract(data,'$.research_retry_at'),0) AS research_retry_at FROM leads" + where + ' ORDER BY COALESCE(reply_at,0) DESC, updated_at DESC LIMIT ? OFFSET ?',
               args + [limit, offset])
+    for item in items:
+        item['dimensions'] = lead(item['id'])['dimensions']
     return {'items': items, 'total': total}
 
 
@@ -186,7 +221,14 @@ def add_candidates(account, items):
             if not d or '.' not in d or blocked(domain=d, account=account):
                 continue
             c = db()
-            fields = ('brand','domain','product_url','match_reason','signal_type','signal_source','note','opportunity_tier','project_name','evidence_quote','published_at','checked_at','procurement_status','missing_information','buyer_role','requested_product','quantity','specifications','arrival_requirement','open_window_evidence','capability_status','source_url','verification','policy_hash')
+            from pipeline_core import features
+            if features.enabled('candidate_pool'):
+                try:
+                    from pipeline_core.scoring import score
+                    item['priority_score']=score(item)
+                except Exception:pass
+            fields = ('priority_score','brand','domain','product_url','match_reason','signal_type','signal_source','note','opportunity_tier','project_name','evidence_quote','published_at','checked_at','procurement_status','missing_information','buyer_role','requested_product','quantity','specifications','arrival_requirement','open_window_evidence','capability_status','source_url','verification','policy_hash')
+            if isinstance(item.get('priority_score'),dict):put('candidate_score_'+d,item['priority_score'])
             tier = item.get('opportunity_tier')
             state = 'backlog' if tier in ('B','C') or item.get('capability_status') == 'needs_confirmation' else 'new'
             cur = c.execute('INSERT OR IGNORE INTO candidates(domain,account,brand,note,created_at,status) VALUES(?,?,?,?,?,?)',
@@ -198,13 +240,19 @@ def add_candidates(account, items):
                     c.execute('UPDATE candidates SET account=?,brand=?,note=?,created_at=?,status=?,reason=? WHERE domain=?',
                         (account,str(item.get('brand',''))[:120],json.dumps({k:str(item.get(k,''))[:1500] for k in fields},ensure_ascii=False),time.time(),state,'refreshed source after eligibility check',d))
                     inserted=1
+            if inserted:
+                c.execute('INSERT INTO lead_events(lead_id,stage,status,reason_code,account,created_at) VALUES(?,?,?,?,?,?)',(d,'discovered','completed','CANDIDATE_FOUND',account,time.time()))
             added += inserted if state == 'new' else 0
             c.commit()
     return added
 
 
+def candidate_order():
+    from pipeline_core import features
+    return "COALESCE((SELECT json_extract(value,'$.total') FROM kv WHERE key='candidate_score_'||candidates.domain),0) DESC, created_at" if features.enabled('candidate_pool') else 'created_at'
+
 def next_candidate(account):
-    return q("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY created_at LIMIT 1", (account,), one=True)
+    return q("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY "+candidate_order()+" LIMIT 1", (account,), one=True)
 
 
 def claim_candidate(account):
@@ -213,7 +261,7 @@ def claim_candidate(account):
         c.execute('BEGIN IMMEDIATE')
         try:
             c.execute("UPDATE candidates SET status='new' WHERE account=? AND status='retry_wait' AND domain IN (SELECT domain FROM crawl_retries WHERE next_at<=?)", (account,time.time()))
-            r = c.execute("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY created_at LIMIT 1", (account,)).fetchone()
+            r = c.execute("SELECT * FROM candidates WHERE account=? AND status='new' ORDER BY "+candidate_order()+" LIMIT 1", (account,)).fetchone()
             if r:
                 c.execute("UPDATE candidates SET status='researching' WHERE domain=?", (r['domain'],))
             c.commit()
@@ -394,12 +442,23 @@ def _record_hold(c, row, now):
     contacted = last_contact(c,row)
     if contacted and now - contacted < CONTACT_COOLDOWN_SECONDS:
         return 'cooldown'
-    if row.get('status') == 'sent' and not contacted:
-        return 'history_time_unknown'
+    if row.get('status') == 'sent':
+        return 'already_sent' if contacted else 'history_time_unknown'
     return ''
 
 
-def _conflict(c, row, preparation=False):
+def _second_contact_exception(c,row,other):
+    from pipeline_core import features
+    if not features.enabled('second_contact'):return False
+    parent=_data(row).get('second_contact_parent_id')
+    if parent!=other['id'] or row.get('account')!=other['account'] or row['email'].casefold()==other['email'].casefold():return False
+    if other['status']!='sent' or other['reply_at'] or _data(other).get('followup_stopped'):return False
+    if c.execute("SELECT 1 FROM send_attempts WHERE lead=? AND result IN ('unknown','bounced')",(parent,)).fetchone():return False
+    contacted=last_contact(c,other)
+    return bool(contacted and time.time()-contacted>=max(7,float(features.option('second_contact_days',7)))*86400)
+
+
+def _conflict(c, row, preparation=False, followup=False):
     row = dict(row);now=time.time()
     keys = identity_keys(row['email'], row['domain'], row['company'])
     vals = {row['email'].strip().casefold(), row['domain'].strip().casefold()}
@@ -411,11 +470,14 @@ def _conflict(c, row, preparation=False):
     own=c.execute('SELECT * FROM leads WHERE id=?',(row['id'],)).fetchone()
     if own:
         reason=_record_hold(c,own,now)
+        from pipeline_core import features
+        if reason in ('cooldown','already_sent') and followup and features.enabled('auto_followup'):reason=''
         if reason:return reason
     active=set(ACTIVE) | {'ready','sending','radar_review'}
     for other in c.execute('SELECT * FROM leads WHERE id<>?', (row['id'],)):
         if not (identity_keys(other['email'],other['domain'],other['company']) & keys):continue
         reason=_record_hold(c,other,now)
+        if reason in ('already_sent','cooldown') and _second_contact_exception(c,row,other):reason=''
         if reason:return reason
         if other['status'] in active and (preparation or other['id'] < row['id'] or other['status']=='sending'):
             return 'duplicate'
@@ -425,6 +487,7 @@ def _conflict(c, row, preparation=False):
         other=c.execute('SELECT * FROM leads WHERE id=?',(owner['lead'],)).fetchone()
         if other:
             reason=_record_hold(c,other,now)
+            if reason in ('already_sent','cooldown') and _second_contact_exception(c,row,other):reason=''
             if reason:return reason
             if other['status'] in active:return 'claimed'
     return ''
@@ -471,7 +534,8 @@ def claim_prospect(account, prospect, source='auto', lid=None, manual=None, hold
     with _lock:
         c = db(); c.execute('BEGIN IMMEDIATE')
         try:
-            row = dict(id=lid or -1, email=prospect.get('email',''), domain=prospect.get('domain',''), company=prospect.get('company',''))
+            existing=c.execute('SELECT * FROM leads WHERE id=?',(lid,)).fetchone() if lid else None
+            row = dict(id=lid or -1, account=account, data=_data(existing) if existing else {}, email=prospect.get('email',''), domain=prospect.get('domain',''), company=prospect.get('company',''))
             reason = _conflict(c, row, preparation=True)
             if reason:
                 c.rollback(); return None
@@ -483,6 +547,8 @@ def claim_prospect(account, prospect, source='auto', lid=None, manual=None, hold
                 lid=cur.lastrowid
             for key in identity_keys(row['email'],row['domain'],row['company']):
                 c.execute('INSERT OR REPLACE INTO identity_claims VALUES(?,?)',(key,lid))
+            from pipeline_core.identity import register
+            register(c,row['domain'],lid,account)
             c.commit();return lid
         except Exception:
             c.rollback();raise
@@ -497,9 +563,14 @@ def reserve_send(lid, acc, message_id, origin=None, followup=False, expected=Non
             if not row or row['account']!=acc['id']:reason='account_mismatch'
             elif row['status'] != ('sent' if followup else 'ready'):reason='not_ready'
             elif row['reply_at'] or (row['message_id'] and not followup):reason='already_contacted'
-            elif followup and (row['followups'] or not acc.get('followup_enabled',False)):reason='followup_disabled'
+            elif followup:
+                from pipeline_core import features
+                if features.enabled('auto_followup'):
+                    data=_data(row)
+                    if row['followups']>=2 or data.get('followup_stopped') or (data.get('followup_ready') or {}).get('index')!=row['followups']+1:reason='followup_not_ready'
+                elif row['followups'] or not acc.get('followup_enabled',False):reason='followup_disabled'
             if not reason and expected and any(row[k]!=expected.get(k) for k in ('email','subject','body','image')):reason='changed'
-            if not reason:reason=_conflict(c,row)
+            if not reason:reason=_conflict(c,row,followup=followup)
             def val(k,d=None):
                 r=c.execute('SELECT value FROM kv WHERE key=?',(k,)).fetchone();return json.loads(r['value']) if r else d
             now=time.time()
@@ -537,7 +608,7 @@ def transport_allowed(token):
         c=db();a=c.execute('SELECT * FROM send_attempts WHERE id=?',(token,)).fetchone()
         if not a or a['result']!='sending':return False
         row=c.execute('SELECT * FROM leads WHERE id=?',(a['lead'],)).fetchone()
-        return bool(row and row['status']=='sending' and not row['reply_at'] and not _conflict(c,row) and not get('paused_'+a['account'],True))
+        return bool(row and row['status']=='sending' and not row['reply_at'] and not _conflict(c,row,followup=bool(a['followup'])) and not get('paused_'+a['account'],True))
 
 
 def finish_send(token,result,note,next_at):
@@ -561,7 +632,9 @@ def finish_send(token,result,note,next_at):
             c.execute('UPDATE leads SET status=?,sent_at=?,message_id=?,tries=?,error=?,updated_at=? WHERE id=?',
                       (status,sent_at,mid,tries,note[:300],now,a['lead']))
             if a['followup'] and result in ('sent','unknown','bounced'):
-                c.execute('UPDATE leads SET followups=1,followup_at=? WHERE id=?',(now,a['lead']))
+                from pipeline_core import features
+                number=min(2,row['followups']+1) if features.enabled('auto_followup') else 1
+                c.execute('UPDATE leads SET followups=?,followup_at=? WHERE id=?',(number,now,a['lead']))
                 key='followups_%s_%s'%(a['account'],today());v=c.execute('SELECT value FROM kv WHERE key=?',(key,)).fetchone()
                 c.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',(key,json.dumps((json.loads(v['value']) if v else 0)+1)))
             if result in ('unknown','bounced'):
@@ -569,13 +642,14 @@ def finish_send(token,result,note,next_at):
             if result in ('sent','unknown','retry','bounced'):
                 c.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',('next_send_'+a['account'],json.dumps(next_at)))
             c.execute('UPDATE send_attempts SET result=?,finished=? WHERE id=?',(result,now,token))
+            c.execute('INSERT INTO lead_events(lead_id,stage,status,reason_code,account,created_at) VALUES(?,?,?,?,?,?)',(a['lead'],'smtp_accept' if result=='sent' else 'smtp_result',result,result.upper(),a['account'],now))
             _audit(c,'send_finished',a['account'],a['lead'],dict(source=a['source'],request_id=a['request_id'],peer=a['peer']),result)
             c.commit()
         except Exception:
             c.rollback();raise
 
 
-def defer_candidate(domain, error):
+def _legacy_defer_candidate(domain, error):
     """At most three deferred rounds; fresh discovery cannot reset this budget."""
     from . import web
     with _lock:
@@ -588,6 +662,24 @@ def defer_candidate(domain, error):
         reason = '临时官网错误：%s；%s' % (web.web_error_label(cause), '重试额度耗尽，需人工核实' if exhausted else '延后第 %d/3 轮重试' % tries)
         x('INSERT OR REPLACE INTO crawl_retries VALUES(?,?,?,?)', (domain, tries, time.time()+delay, reason))
         mark_candidate(domain, 'retry_exhausted' if exhausted else 'retry_wait', reason)
+
+
+def defer_candidate(domain,error):
+    from pipeline_core import features,retry_policy
+    from . import web
+    if not features.enabled('unified_retry'):return _legacy_defer_candidate(domain,error)
+    with _lock:
+        prev=q('SELECT attempts FROM crawl_retries WHERE domain=?',(domain,),one=True)
+        cause=web.transient_failure(error) or error
+        try:
+            result=retry_policy.decide(cause,prev['attempts'] if prev else 0,
+                deferred=isinstance(cause,web.DeferredFetch),jitter=__import__('random').uniform(0,.25))
+        except Exception:return _legacy_defer_candidate(domain,error)
+        reason=result['reason_code']+': '+result['last_error']
+        x('INSERT OR REPLACE INTO crawl_retries(domain,attempts,next_at,reason) VALUES(?,?,?,?)',
+          (domain,result['retry_count'],result['next_retry_at'],reason))
+        put('candidate_retry_'+domain,result)
+        mark_candidate(domain,'retry_wait' if result['action']=='retry' else 'retry_exhausted',reason)
 
 
 def delivery_stats(account):
@@ -616,3 +708,8 @@ def operation_report(days=7):
         row['tokens_status'] = 'reported' if (row['input'] or row['output']) else 'not_reported_or_zero'
         row.pop('recorded_cost',None)
     return dict(days=days,timing=timing,usage=usage,as_of=time.time(),duration_note='耗时仅包含升级后的实测记录；历史未记录，不补算。',cost_note='订阅调用未折算金额；估算不等于账单。')
+
+
+def event(lid,stage,status,reason_code,account=None,duration_ms=None):
+    return x('INSERT INTO lead_events(lead_id,stage,status,reason_code,duration_ms,account,created_at) VALUES(?,?,?,?,?,?,?)',
+             (lid,stage,status,reason_code,duration_ms,account,time.time()))
