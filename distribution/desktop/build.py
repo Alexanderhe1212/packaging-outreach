@@ -3,7 +3,7 @@ import pathlib,subprocess,sys,shutil,zipfile,tarfile,json,hashlib
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 OUT=ROOT/'dist';OUT.mkdir(exist_ok=True)
 sep=';' if sys.platform=='win32' else ':'
-args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','UserRadar','--onedir','--collect-all','PySide6','--copy-metadata','PySide6','--copy-metadata','shiboken6','--collect-data','outreach','--collect-submodules','outreach','--collect-submodules','pipeline_core','--collect-submodules','userradar']
+args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','UserRadar','--onedir','--copy-metadata','PySide6','--copy-metadata','shiboken6','--collect-data','outreach','--collect-submodules','outreach','--collect-submodules','pipeline_core','--collect-submodules','userradar']
 for name in ['app.py','defaults.json','profiles','ui','userradar','LICENSE','THIRD_PARTY_NOTICES.md','distribution/desktop/接入与使用指南.md']:
  args+=['--add-data',str(ROOT/name)+sep+name if (ROOT/name).is_dir() else str(ROOT/name)+sep+'.']
 args+=['--paths',str(ROOT),'--paths',str(ROOT/'userradar')]
