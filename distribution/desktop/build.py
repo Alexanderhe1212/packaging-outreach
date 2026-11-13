@@ -17,6 +17,7 @@ name='UserRadar-'+{'win32':'Windows-x64','darwin':'macOS','linux':'Linux-x64'}[s
 if sys.platform=='darwin':
  subprocess.run(['codesign','--force','--deep','--sign','-',str(OUT/'UserRadar.app')],check=True)
  subprocess.run(['codesign','--verify','--deep','--strict',str(OUT/'UserRadar.app')],check=True)
+ subprocess.run(['hdiutil','create','-volname','User Radar','-srcfolder',str(OUT/'UserRadar.app'),'-ov','-format','UDZO',str(OUT/(name+'.dmg'))],check=True)
  subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(OUT/'UserRadar.app'),str(OUT/(name+'.zip'))],check=True)
 elif sys.platform=='win32':
  shutil.make_archive(str(OUT/name),'zip',OUT/'UserRadar')
