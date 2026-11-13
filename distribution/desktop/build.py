@@ -1,5 +1,5 @@
 """Build native artifacts on their target OS, using only repository runtime files."""
-import pathlib,subprocess,sys,shutil,zipfile,tarfile,json,hashlib
+import pathlib,subprocess,sys,shutil,zipfile,tarfile,json,hashlib,plistlib
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 OUT=ROOT/'dist';OUT.mkdir(exist_ok=True)
 sep=';' if sys.platform=='win32' else ':'
@@ -7,14 +7,19 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','UserRa
 for name in ['app.py','defaults.json','profiles','ui','userradar','LICENSE','THIRD_PARTY_NOTICES.md','distribution/desktop/接入与使用指南.md']:
  args+=['--add-data',str(ROOT/name)+sep+name if (ROOT/name).is_dir() else str(ROOT/name)+sep+'.']
 args+=['--paths',str(ROOT),'--paths',str(ROOT/'userradar')]
-if sys.platform=='darwin':args+=['--windowed','--osx-bundle-identifier','com.packagingoutreach.userradar']
+if sys.platform=='darwin':args+=['--exclude-module','PySide6','--exclude-module','shiboken6']
 args+=[str(ROOT/'distribution/desktop/launcher.py')]
 subprocess.run(args,cwd=ROOT,check=True)
 exe=OUT/'UserRadar'/('UserRadar.exe' if sys.platform=='win32' else 'UserRadar')
-if sys.platform=='darwin':exe=OUT/'UserRadar.app/Contents/MacOS/UserRadar'
+
 subprocess.run([str(exe),'--smoke-test'],check=True,timeout=90)
 name='UserRadar-'+{'win32':'Windows-x64','darwin':'macOS','linux':'Linux-x64'}[sys.platform]
 if sys.platform=='darwin':
+ app=OUT/'UserRadar.app';(app/'Contents/MacOS').mkdir(parents=True);(app/'Contents/Resources/runtime').mkdir(parents=True)
+ shutil.copytree(OUT/'UserRadar',app/'Contents/Resources/runtime/UserRadar',symlinks=True)
+ (app/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(CFBundleExecutable='UserRadarShell',CFBundleIdentifier='com.packagingoutreach.userradar',CFBundleName='User Radar',CFBundlePackageType='APPL',CFBundleShortVersionString='1.5.0',NSHighResolutionCapable=True)))
+ subprocess.run(['xcrun','swiftc',str(ROOT/'distribution/desktop/MacShell.swift'),'-o',str(app/'Contents/MacOS/UserRadarShell'),'-framework','Cocoa','-framework','WebKit'],check=True)
+ subprocess.run([str(app/'Contents/MacOS/UserRadarShell'),'--smoke-test'],check=True,timeout=90)
  subprocess.run(['codesign','--force','--deep','--sign','-',str(OUT/'UserRadar.app')],check=True)
  subprocess.run(['codesign','--verify','--deep','--strict',str(OUT/'UserRadar.app')],check=True)
  subprocess.run(['hdiutil','create','-volname','User Radar','-srcfolder',str(OUT/'UserRadar.app'),'-ov','-format','UDZO',str(OUT/(name+'.dmg'))],check=True)

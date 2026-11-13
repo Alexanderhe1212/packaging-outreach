@@ -1,5 +1,5 @@
 """Bundled desktop supervisor. Opening always pauses the local accounts; never sends."""
-import json,os,tempfile,pathlib,runpy,socket,subprocess,sys,time,urllib.request
+import json,os,signal,tempfile,pathlib,runpy,socket,subprocess,sys,time,urllib.request
 ROOT=pathlib.Path(getattr(sys,'_MEIPASS',pathlib.Path(__file__).resolve().parents[2]))
 def environment():
     if sys.platform=='win32':base=pathlib.Path(os.environ.get('LOCALAPPDATA',str(pathlib.Path.home())))/'UserRadar'
@@ -38,6 +38,8 @@ def main():
     for a in config.load()['accounts']:store.put('paused_'+a['id'],True)
     store.close()
     children=[]
+    if '--serve-only' in sys.argv:
+        signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         for name in ('outreach','radar'):
             cmd=[sys.executable,'--service',name] if getattr(sys,'frozen',False) else [sys.executable,str(pathlib.Path(__file__).resolve()),'--service',name]
@@ -52,6 +54,8 @@ def main():
         if '--smoke-test' in sys.argv:
             state=request(ports[0],'/api/state')
             assert all(a['paused'] for a in state['accounts'])
+            if sys.platform=='darwin':
+                print(json.dumps({'ok':True,'platform':sys.platform,'accounts_paused':True,'services':2,'smtp_calls':0}));return
             os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS','--disable-gpu --no-sandbox')
             from PySide6.QtWidgets import QApplication
             from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -64,6 +68,10 @@ def main():
             view.setUrl(QUrl('http://127.0.0.1:%d/setup'%ports[0]));view.show();app.exec()
             assert result==[True],'Desktop setup page failed to render'
             print(json.dumps({'ok':True,'platform':sys.platform,'accounts_paused':True,'services':2,'setup_page_rendered':True,'smtp_calls':0}));return
+        if '--serve-only' in sys.argv:
+            print('USER_RADAR_READY',flush=True)
+            while all(p.poll() is None for p in children):time.sleep(1)
+            return
         from PySide6.QtWidgets import QApplication,QMainWindow,QToolBar
         from PySide6.QtWebEngineWidgets import QWebEngineView
         from PySide6.QtCore import QUrl
