@@ -52,12 +52,24 @@ def main():
         if '--smoke-test' in sys.argv:
             state=request(ports[0],'/api/state')
             assert all(a['paused'] for a in state['accounts'])
-            print(json.dumps({'ok':True,'platform':sys.platform,'accounts_paused':True,'services':2,'smtp_calls':0}));return
+            os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS','--disable-gpu --no-sandbox')
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtCore import QUrl,QTimer
+            app=QApplication(sys.argv);view=QWebEngineView();view.resize(1100,800);result=[]
+            def loaded(ok):
+                if not ok:result.append(False);app.quit();return
+                view.page().runJavaScript("document.querySelector('h1')?.textContent",lambda text:(result.append(text=='首次接入指导'),app.quit()))
+            view.loadFinished.connect(loaded);QTimer.singleShot(20000,app.quit)
+            view.setUrl(QUrl('http://127.0.0.1:%d/setup'%ports[0]));view.show();app.exec()
+            assert result==[True],'Desktop setup page failed to render'
+            print(json.dumps({'ok':True,'platform':sys.platform,'accounts_paused':True,'services':2,'setup_page_rendered':True,'smtp_calls':0}));return
         from PySide6.QtWidgets import QApplication,QMainWindow,QToolBar
         from PySide6.QtWebEngineWidgets import QWebEngineView
         from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
         app=QApplication(sys.argv);window=QMainWindow();window.setWindowTitle('User Radar');window.resize(1250,850)
-        view=QWebEngineView();window.setCentralWidget(view);bar=QToolBar();window.addToolBar(bar)
+        view=QWebEngineView();view.page().newWindowRequested.connect(lambda req:QDesktopServices.openUrl(req.requestedUrl()) if req.requestedUrl().scheme() in ('http','https') else None);window.setCentralWidget(view);bar=QToolBar();window.addToolBar(bar)
         for title,path in [('接入 / Setup','/setup'),('邮件 / Mail','/'),('展会审核 / Exhibitors','/expansion'),('客户 / Contacts','/radar'),('设置 / Settings','/?view=settings')]:
             action=bar.addAction(title);action.triggered.connect(lambda checked=False,p=path:view.setUrl(QUrl('http://127.0.0.1:18800'+p)))
         view.setUrl(QUrl('http://127.0.0.1:18800/setup'));window.show();app.exec()
