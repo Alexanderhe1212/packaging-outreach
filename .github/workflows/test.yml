@@ -12,7 +12,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       NO_PROXY: 127.0.0.1,localhost
-      no_proxy: 127.0.0.1,localhost
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
