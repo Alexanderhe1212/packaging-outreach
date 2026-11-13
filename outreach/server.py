@@ -321,6 +321,7 @@ def api_quit(_data):
 GET = {'/api/crawl-retries': lambda qs: {'items': store.q("SELECT c.account,c.domain,c.status,c.reason,r.attempts,r.next_at FROM candidates c JOIN crawl_retries r ON c.domain=r.domain WHERE c.account=? AND c.status IN ('retry_wait','retry_exhausted') ORDER BY r.next_at LIMIT 50", (qs.get('account',[''])[0],))}, '/api/operations': lambda qs: store.operation_report(int(qs.get('days',['7'])[0])), '/api/audit': lambda qs: {'items': store.q('SELECT * FROM audit ORDER BY id DESC LIMIT 100')}, '/api/state': api_state, '/api/mailbox': api_mailbox, '/api/leads': api_leads, '/api/settings': api_settings_get,
        '/api/usage': lambda qs: store.usage_summary(int(qs.get('days', ['7'])[0])),
        '/api/update/check': lambda _q: updater.check(), '/api/ping': lambda _q: {'ok': True, 'version': VERSION, 'build': 'pipeline-refactor-20261023', 'instance_id': INSTANCE_ID, 'started_at': SERVICE_STARTED}}
+GET['/api/expansion']=lambda q: __import__('outreach.expansion_review',fromlist=['overview']).overview(q)
 GET['/api/radar']=radar.overview
 GET['/api/problems']=problems.overview
 from . import funnel
@@ -334,7 +335,7 @@ def api_dns_check(data):
     store.put('dns_check_'+data['account'],result)
     return result
 
-POST = {'/api/pipeline-features':lambda data:pipeline_features.update({k:v for k,v in data.items() if k!='_origin'}), '/api/dns-check':api_dns_check, '/api/radar/recheck-handoff': radar.recheck_handoff, '/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
+POST = {'/api/expansion/review':lambda d:__import__('outreach.expansion_review',fromlist=['review']).review(d), '/api/distributor/prepare':lambda d:__import__('outreach.distributor',fromlist=['prepare']).prepare(d), '/api/pipeline-features':lambda data:pipeline_features.update({k:v for k,v in data.items() if k!='_origin'}), '/api/dns-check':api_dns_check, '/api/radar/recheck-handoff': radar.recheck_handoff, '/api/problems/add': problems.add, '/api/problems/resolve': problems.resolve, '/api/radar/import': radar.import_contacts, '/api/radar/release': radar.release, '/api/radar/configure': radar.configure,
         '/api/exhibition/prepare': exhibition.prepare, '/api/exhibition/approve': exhibition.approve, '/api/exhibition/revise': exhibition.revise,
         '/api/start': lambda d: control(d, False), '/api/pause': lambda d: control(d, True), '/api/add': api_add,
         '/api/send': api_send, '/api/skip': api_skip, '/api/edit': api_edit, '/api/redo': api_redo,
@@ -373,6 +374,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply({'error': 'local only'}, 403)
         u = urlsplit(self.path)
         try:
+            if u.path=='/setup':
+                return self.reply((config.ROOT/'ui/setup.html').read_bytes(),ctype='text/html; charset=utf-8')
+            if u.path=='/expansion':
+                return self.reply((config.ROOT/'ui/expansion.html').read_bytes(),ctype='text/html; charset=utf-8')
             if u.path=='/funnel':
                 return self.reply((config.ROOT/'ui/funnel.html').read_bytes(),ctype='text/html; charset=utf-8')
             if u.path in ('/', '/index.html'):

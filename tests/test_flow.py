@@ -147,7 +147,7 @@ class FlowTest(unittest.TestCase):
                      'accounts': [{'id': 'MTT', 'name': 'MTT', 'company_name': 'MTT Packaging', 'contact_name': 'Hugo',
                                    'sender': 'hello@acme-pack.com', 'whatsapp': '15555550100', 'profile': 'packaging',
                                    'smtp': {'host': 'smtp.test', 'port': 465}, 'imap': {'host': 'imap.test', 'port': 993},
-                                   'signature': 'Hugo He\nMTT Packaging', 'auto_send': True, 'daily_limit': 40},
+                                   'signature': 'Hugo He\nMTT Packaging\nWhatsApp: +1 555 555 0100', 'auto_send': True, 'daily_limit': 40},
                                   {'id': 'GUKA', 'name': 'GUKA', 'company_name': 'GUKA Packaging', 'sender': 'sales@second-brand.com',
                                    'smtp': {'host': 'smtp.test', 'port': 465}, 'imap': {'host': 'imap.test', 'port': 993}}]})
         config.save_secrets(keys={'main': 'sk-test'}, passwords={'MTT': 'pw'})

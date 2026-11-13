@@ -1,5 +1,5 @@
 """macOS desktop entry; reuse one local server, never start outreach."""
-import fcntl
+from pipeline_core import file_lock as fcntl
 import json
 import socket
 import subprocess

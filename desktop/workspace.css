@@ -1,0 +1,91 @@
+/* Shared workspace tokens. Native sidebar stays 206px to match its WKWebView frame. */
+:root{
+ color-scheme:light;--bg:#f5f7f8;--panel:#fff;--panel2:#f0f4f4;--ink:#17343b;
+ --text:var(--ink);--muted:#60757b;--line:#dfe8e9;--border:var(--line);
+ --accent:#15776d;--teal:var(--accent);--green:var(--accent);--primary:var(--accent);
+ --soft:#e8f4f0;--bad:#ad453c;--warn:#966423;--good:#23765c;
+ --shadow:0 3px 16px #17343b05;
+}
+body{background:var(--bg);color:var(--text);font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1180px;padding:32px 36px}
+h1,.workspace-heading h1,.intro h1{font-size:29px;line-height:1.3;letter-spacing:-.7px;color:var(--ink);font-weight:720;margin:0 0 10px}
+h2,h3{color:var(--ink)}p.muted,.workspace-heading p,.page-head p,.intro p{font-size:13px;line-height:1.7;color:var(--muted)}
+button,input,select,textarea{font:inherit;border-radius:9px}
+button{min-height:36px;transition:background .15s,border-color .15s;color:var(--ink)}
+button:not(:disabled):hover{border-color:var(--accent);background:var(--soft)}
+button.primary,button.retry,.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.primary:not(:disabled):hover,button.retry:not(:disabled):hover{filter:brightness(.94);background:var(--accent)}
+button:disabled{cursor:not-allowed;opacity:.45}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #70b9b0;outline-offset:3px}
+input:not([type=checkbox]):not([type=radio]),select,textarea{border:1px solid var(--line);background:var(--panel);padding:9px 12px;color:var(--ink)}
+.card,.panel,.advanced-panel,.compact-details,.stat{border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:var(--shadow)}
+.workspace-heading,.page-head{margin-bottom:24px}
+.tabs button{min-height:36px;padding:7px 11px!important;color:var(--muted);font-size:12px!important}
+.tabs button.on,.tabs button[aria-pressed=true]{background:var(--soft);color:var(--accent);font-weight:650;border-radius:8px}
+.lead-table th,th{background:#f8fafb;color:var(--muted);font-weight:550}
+.lead-table td{padding:17px 14px;border-color:#edf1f2}.lead-table .co b{font-weight:650}
+.lead-table .co small{font-size:12px}.lead-table tr:hover{background:#f7fbfa}
+.st,.badge,.tag{border-radius:6px;font-size:11px;font-weight:550}
+.drawer{background:var(--panel);box-shadow:-10px 0 44px #17343b12}.dhead{background:#f8fafb}
+.stats .stat strong{font-size:36px;letter-spacing:-1px;color:var(--ink);font-variant-numeric:tabular-nums}
+.summary,.tools{gap:16px}.summary strong{font-variant-numeric:tabular-nums}
+.submitbar{background:#fff;box-shadow:0 -3px 20px #17343b05;border-color:var(--line)}
+.advanced,.hint,.meta{color:var(--muted)}
+.settings-view #setModal{padding:28px}.settings-view .mbox{border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.settings-view .mhead{background:#f8fafb;padding:18px 22px}.settings-view .mbody{padding:24px}
+.eyebrow{font-size:10px;font-weight:650;letter-spacing:1.7px;color:var(--muted);text-transform:uppercase}
+.desktop-shell aside{width:206px;padding:28px 14px 18px;background:#fff;border-color:var(--line)}
+.desktop-shell main{margin-left:206px;max-width:none;padding:0}
+.desktop-shell .brand{font-size:23px;letter-spacing:-.9px;padding:0 14px}
+.desktop-shell .subbrand{font-size:10px;letter-spacing:1px;padding:4px 14px;margin-bottom:32px}
+.desktop-shell nav{display:flex;flex-direction:column;gap:5px;flex:1}
+.desktop-shell nav>button,.desktop-shell .nav-parent>button[data-tab]{font-size:13px;padding:11px 14px;border-radius:9px;min-height:44px}
+.desktop-shell .nav-group{margin-bottom:0}
+.desktop-shell nav>button[data-tab=problems]{margin-top:auto;border-top:0}
+.desktop-shell nav>button.active,.desktop-shell .nav-parent:has(.active){background:var(--soft);color:var(--accent);border-radius:9px;box-shadow:inset 3px 0 var(--accent)}
+.desktop-shell .nav-parent .active{background:transparent;box-shadow:none}
+.desktop-shell .foot{font-size:10px;border-top:1px solid var(--line);padding:15px 14px 0;margin-top:20px}
+.desktop-shell header{height:83px;background:#fff;padding:0 32px;border-color:var(--line);gap:16px}
+.desktop-shell header strong{margin-right:auto;font-size:14px}
+.desktop-shell header select{font-size:11px;padding:5px 8px;max-width:155px}
+.desktop-shell .page{max-width:1170px;padding:34px 36px}
+.desktop-shell .intro{margin-bottom:24px}
+.desktop-shell .pill{background:#e9f2f3;color:#365d65;font-size:11px;letter-spacing:.3px}
+.desktop-shell .hero{background:#163e43;border:0;border-radius:16px;padding:28px 30px;box-shadow:0 8px 20px #163e4309}
+.desktop-shell .hero .eyebrow{color:#9ac4be;letter-spacing:1.7px;margin-bottom:10px}
+.desktop-shell .hero h2{font-size:23px;color:#fff;margin:0 0 9px;line-height:1.35}
+.desktop-shell .hero p{color:#c0d6d3;font-size:12px;max-width:550px}
+.desktop-shell .hero button.primary{background:#e6f4ef;border-color:#e6f4ef;color:#164c43;padding:11px 22px;white-space:nowrap}
+.desktop-shell .stats{gap:16px;margin:22px 0}.desktop-shell .stat{padding:20px 23px}
+.desktop-shell .stat span{font-size:12px}.desktop-shell .stat small{font-size:11px}
+.desktop-shell .compact-details{padding:16px 20px;margin-top:18px}
+.desktop-shell .compact-details>summary{padding:0;color:var(--ink);font-size:13px}
+.desktop-shell .compact-details .panel{box-shadow:none;border:0;padding:8px 0 0}
+.desktop-shell .compact-details .paneltitle h3{display:none}
+.desktop-shell .compact-details .paneltitle .textbutton{margin-left:auto;margin-bottom:10px}
+.desktop-shell .compact-details table{font-size:12px}.desktop-shell .compact-details th{background:none;padding:10px 8px}
+.desktop-shell .compact-details td{padding:12px 8px}
+.desktop-shell .market-note{margin:0 0 6px;font-size:10px;letter-spacing:1.3px;color:var(--accent)}
+.desktop-shell .pipeline-strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.desktop-shell .pipeline-strip span{font-size:11px;color:var(--muted);padding:6px 10px;background:#edf2f3;border-radius:6px}
+.desktop-shell .pipeline-strip b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+.issue-head{display:flex;justify-content:space-between;align-items:start;gap:20px}
+.issue-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0}
+.issue-metric{padding:18px 22px;background:#fff;border:1px solid var(--line);border-radius:13px}
+.issue-metric small{display:block;color:var(--muted);font-size:11px}.issue-metric strong{font-size:30px;letter-spacing:-.7px;font-variant-numeric:tabular-nums}
+.issue-metric.urgent{border-top:3px solid #b87350}
+.issue-tools{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.issue-tools input{flex:1;min-width:150px}
+.issue-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);padding-bottom:14px;margin:22px 0 18px}
+.issue-tabs button{border:0;background:transparent;font-size:12px;color:var(--muted);padding:7px 11px}
+.issue-tabs button.active{background:var(--soft);color:var(--accent);font-weight:650}
+.issue-row{border:1px solid var(--line);border-radius:12px;background:white;padding:17px 20px;margin-bottom:10px}
+.issue-row .who{font-size:14px;font-weight:650;overflow-wrap:anywhere}.issue-row .reason{font-size:12px;margin:10px 0;color:#755f48;overflow-wrap:anywhere}
+.issue-row .meta{font-size:11px}.issue-row .row{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.issue-row details{margin-top:10px}.issue-row summary{font-size:11px;color:var(--muted)}
+.issue-pager{display:flex;justify-content:space-between;align-items:center;margin:20px 0;font-size:12px;color:var(--muted)}
+.issue-pager div{display:flex;gap:8px}.issue-empty{padding:50px 20px;text-align:center;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}
+.research-page button:not(.secondary){background:var(--accent);border-color:var(--accent);color:#fff}
+.research-page button.secondary{background:var(--soft);color:var(--accent)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media(max-width:1100px){.desktop-shell .page{padding:26px}.desktop-shell .hero{padding:23px}.desktop-shell .hero h2{font-size:21px}}
+@media(max-width:650px){main{padding:22px 16px}h1,.workspace-heading h1{font-size:25px}.issue-metrics{gap:8px}.issue-metric{padding:12px}.issue-metric strong{font-size:25px}.issue-head{flex-wrap:wrap}.issue-row{padding:15px}.issue-tools select{width:100%}.issue-tabs{gap:3px}.settings-view #setModal{padding:12px}}

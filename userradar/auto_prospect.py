@@ -1,5 +1,6 @@
 """One company at a time: discover, read official site, save, hand off."""
-import fcntl,json,os,re,signal,threading,time,urllib.request
+from pipeline_core import file_lock as fcntl
+import json,os,re,signal,threading,time,urllib.request
 from pathlib import Path
 from datetime import datetime,timezone
 import ai_discovery,app,customer_store,prospect_filter

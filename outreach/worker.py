@@ -1,3 +1,4 @@
+import re
 """每个账号一个后台线程：收件箱检查 → 按节奏发送 → 空档里准备下一位客户。某一步失败就换下一家，不卡住。"""
 import random
 import threading
@@ -91,7 +92,11 @@ class AccountWorker(threading.Thread):
 
     @property
     def profile(self):
-        return config.profile(self.acc.get('profile', 'packaging'))
+        profile = config.profile(self.acc.get('profile', 'packaging'))
+        if self.acc.get('text_only') is True:
+            profile = dict(profile, require_abc=False, hybrid_concepts=False, inquiry_first=True,
+                           image=dict(profile.get('image', {}), enabled=False))
+        return profile
 
     @property
     def paused(self):
@@ -375,6 +380,8 @@ class AccountWorker(threading.Thread):
             # or a recheck changed the address. The writer resolves the exact email.
             fields = contact.get('evidence_by_field') or {}
             p['contact_identity_evidence'] = fields.get('identity', []) + fields.get('email', [])
+            p['verified_product_context'] = [x.get('evidence', {}) for x in fields.get('recruitment', []) if x.get('eligible') and x.get('evidence')]
+
             if prof.get('require_abc') and not p.get('concept_ready'):
                 self.activity = '重新核实官网邮箱与真实产品：' + lead['company']
                 p, photo = pipeline.research(acc, p.get('website') or lead['domain'], p.get('email',''), manual=True)
@@ -483,30 +490,45 @@ class AccountWorker(threading.Thread):
             lead=store.lead(lead['id']);acc=self.acc
             if not lead or lead['account']!=self.id:
                 return 'account_mismatch'
+            from .partnership import eligible as partnership_eligible
+            from .distributor import eligible as distributor_eligible
+            distributor = distributor_eligible(lead)
+            if lead['data'].get('distributor_review') and not distributor:
+                return 'distributor_review_required'
+            partnership = partnership_eligible(lead)
+            if lead['source']=='designer_partnership' and not partnership:
+                return 'partnership_review_required'
+            if partnership:
+                acc=dict(acc,text_only=True)
             if lead['source'] == 'exhibition' and not exhibition.approved(lead):
                 return 'exhibition_review_required'
-            if lead['source'] != 'exhibition' and self.profile.get('discovery_rules') and (lead['data'].get('prospect',{}).get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
+            if not partnership and not distributor and lead['source'] != 'exhibition' and self.profile.get('discovery_rules') and (lead['data'].get('prospect',{}).get('discovery_evidence') or {}).get('opportunity_tier') not in ('A+','A'):
                 store.audit('send_denied',self.id,lead['id'],origin,'procurement_evidence_required')
                 return 'procurement_evidence_required'
             from .prospect_filter import prospect_reason
-            reason = prospect_reason(lead['data'].get('prospect') or {})
+            reason = '' if partnership or distributor else prospect_reason(lead['data'].get('prospect') or {})
             if reason:
                 if lead['status'] == 'ready' and not lead.get('sent_at') and not lead.get('message_id'):
                     store.update(lead['id'],status='skipped',error=reason)
                 store.audit('send_denied',self.id,lead['id'],origin,'non_target_business')
                 return 'non_target_business'
             img=Path(lead['image']).read_bytes() if lead.get('image') and Path(lead['image']).exists() else None
-            if self.profile.get('require_abc'):
+            if not partnership and self.profile.get('require_abc'):
                 p = lead['data'].get('prospect', {})
                 plan = lead['data'].get('plan', {})
                 if not (p.get('email_verified') and p.get('product_name') and p.get('product_url') and p.get('concept_ready') and img and all(plan.get(k) for k in ('a','b','c'))):
                     store.update(lead['id'], status='failed', error='缺少官网邮箱、真实产品或完整 ABC 效果图，未发送')
                     return 'concept_requirements_missing'
 
-            if lead['data'].get('prospect',{}).get('concept_ready') and lead['data'].get('plan',{}).get('c') and not img:
+            if acc.get('text_only') is not True and lead['data'].get('prospect',{}).get('concept_ready') and lead['data'].get('plan',{}).get('c') and not img:
                 store.audit('send_denied',self.id,lead['id'],origin,'concept_image_missing')
                 return 'concept_image_missing'
             p = lead['data'].get('prospect', {})
+            if not followup and (lead['data'].get('plan', {}).get('observation_quote') == 'PUBLIC_CONTACT_ONLY' or 'publishes a business contact' in str(lead.get('body') or '').lower()):
+                store.audit('send_denied', self.id, lead['id'], origin, 'product_specific_observation_required')
+                if lead['status'] == 'ready':
+                    store.update(lead['id'], status='failed', error='缺少客户具体产品观察，通用介绍不得发送；需补查并重新生成')
+                return 'product_specific_observation_required'
             if not followup and p.get('recipient_identity_confirmed'):
                 expected_greeting = 'Hi ' + pipeline.recipient_label(p) + ','
                 if not str(lead.get('body') or '').lstrip().startswith(expected_greeting):
@@ -514,9 +536,13 @@ class AccountWorker(threading.Thread):
                         store.update(lead['id'], status='failed', error='已核实本人姓名但邮件称呼不一致，未发送；需重新生成')
                     store.audit('send_denied', self.id, lead['id'], origin, 'recipient_greeting_mismatch')
                     return 'recipient_greeting_mismatch'
-            if not img:
+            if not img and acc.get('text_only') is not True:
                 store.audit('send_denied',self.id,lead['id'],origin,'concept_image_missing')
                 return 'concept_image_missing'
+            if acc.get('text_only') is True:
+                img = None
+                if re.search(r'\b(?:attached (?:image|photo|concept|design|file)|(?:please |see |find |I have |I.ve )attached|see (?:the |our )?(?:image|concept)|concepts? (?:below|above))\b', lead.get('body',''), re.I):
+                    return 'text_mode_attachment_claim'
             msg=mailer.build_followup(acc,lead,self.profile) if followup else mailer.build(acc,lead,img)
             origin=origin or {'source':'manual_internal' if manual else ('followup' if followup else 'scheduler')}
             if dry_run:

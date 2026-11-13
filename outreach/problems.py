@@ -44,6 +44,11 @@ def category(item, now):
 def retry_action(lead):
     # A failed concept may have an incorrect plan too: rebuild both using saved facts.
     reason = lead.get('error', '')
+    prospect = (lead.get('data') or {}).get('prospect') or {}
+    if (reason == '邮件内容不完整' and prospect.get('email_verified') is True
+            and prospect.get('concept_ready') is True and prospect.get('product_url')):
+        # Rebuild the draft; downstream identity, product and send checks still apply.
+        return 'write'
     return 'write' if 'Concept image review failed:' in reason else 'research'
 
 def issue_group(item):
