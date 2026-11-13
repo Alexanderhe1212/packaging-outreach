@@ -1,0 +1,90 @@
+name: Desktop build and startup verification
+on:
+  push:
+    branches: [release/desktop-20261113, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      NO_PROXY: 127.0.0.1,localhost
+      PYTHONUTF8: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libxkbcommon0 libxcb-cursor0 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2
+      - run: python -m pip install -r distribution/desktop/requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m unittest discover -s distribution/windows/tests -v
+      - run: python distribution/desktop/build.py
+      - if: runner.os == 'Windows'
+        run: choco install nsis --yes --no-progress
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /NOCD distribution/desktop/installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed" }
+          $dest = Join-Path $env:RUNNER_TEMP 'UserRadarInstalled'
+          Start-Process dist/UserRadar-Windows-Setup.exe -ArgumentList "/S", "/D=$dest" -Wait
+          & "$dest/UserRadar.exe" --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed application failed" }
+          Start-Process "$dest/Uninstall.exe" -ArgumentList '/S' -Wait
+          if (Test-Path "$dest/UserRadar.exe") { throw "Uninstall did not remove executable" }
+      - name: Hash packaged artifacts
+        shell: python
+        run: |
+          import pathlib,hashlib
+          root=pathlib.Path('dist')
+          artifacts=[p for p in root.iterdir() if p.is_file() and p.suffix in ('.zip','.gz','.dmg','.exe')]
+          (root/'SHA256SUMS.txt').write_text('\n'.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name for p in artifacts)+'\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UserRadar-${{ runner.os }}
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/*.dmg
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+  publish:
+    needs: desktop
+    if: github.ref == 'refs/heads/main' && github.repository == 'Alexanderhe1212/packaging-outreach'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = `desktop-${context.sha.slice(0,12)}`;
+            let release;
+            try { release = (await github.rest.repos.getReleaseByTag({...context.repo,tag})).data; }
+            catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({...context.repo,tag_name:tag,target_commitish:context.sha,name:'User Radar desktop preview',prerelease:true,body:'Windows x64, macOS Apple Silicon and Linux x64 desktop builds. Each artifact passed native backend startup and setup-page rendering checks. Windows additionally passed silent installation/start/uninstallation checks. No credentials or customer data included. First launch pauses accounts. Unsigned/ad-hoc signed preview, not a notarized commercial release. SMTP acceptance is not inbox delivery.'})).data;
+            }
+            for (const directory of fs.readdirSync('release-artifacts')) {
+              const folder = path.join('release-artifacts',directory);
+              for (const file of fs.readdirSync(folder)) {
+                if (!/\.(exe|dmg|zip|tar\.gz)$/.test(file) && file !== 'SHA256SUMS.txt') continue;
+                const name = file === 'SHA256SUMS.txt' ? `${directory}-${file}` : file;
+                if (release.assets.some(asset => asset.name === name)) continue;
+                const data = fs.readFileSync(path.join(folder,file));
+                await github.rest.repos.uploadReleaseAsset({...context.repo,release_id:release.id,name,data,headers:{'content-type':'application/octet-stream','content-length':data.length}});
+              }
+            }

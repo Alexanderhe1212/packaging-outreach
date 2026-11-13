@@ -119,6 +119,8 @@ def discover(account, profile):
 def research(account, url, email_hint='', manual=False, email_sources=None):
     """Prospect dict + product photo bytes, read from the official site. Raises web.CrawlError."""
     prof = config.profile(account.get('profile', 'packaging'))
+    if account.get('text_only') is True:
+        prof = dict(prof, inquiry_first=True, require_abc=False, hybrid_concepts=False)
     from pipeline_core import evidence,features
     cached=None
     if features.enabled('evidence_pack'):
@@ -170,8 +172,10 @@ def research(account, url, email_hint='', manual=False, email_sources=None):
 
 def research_fit(account, url, email_hint='', manual=False, email_sources=None):
     """Verify business context and public contact without requiring a retail SKU/photo."""
+    if web.urlsplit(url).path.lower().endswith('.pdf'):
+        raise web.CrawlError('PDF资料不能证明当前产品，需官网现售产品页面复核')
     profile = config.profile(account.get('profile', 'packaging'))
-    if profile.get('hybrid_concepts'):
+    if profile.get('hybrid_concepts') and account.get('text_only') is not True:
         try:
             product = web.crawl(url, email_hint, email_sources=email_sources) if email_sources else web.crawl(url, email_hint)
             if product.get('email_verified') and product.get('product_name') and product.get('product_url'):
@@ -205,7 +209,7 @@ def research_fit(account, url, email_hint='', manual=False, email_sources=None):
         'Return JSON: company, suitable (boolean), business_type, evidence_quote (exact substring from text), match_reason. '
         'Focus on the brand or product described by this page, not unrelated parent-company navigation. '
         'Suitable means a physical-product brand, packaging/brand design agency, or gift/product distributor with plausible paper packaging relevance. '
-        'Do not require current purchasing evidence. Exclude unrelated services and packaging manufacturers. '
+        'Require explicit physical products or product ranges on this current HTML page; a contact page, service-only page or historical document alone is insufficient. Do not require current purchasing evidence. Exclude unrelated services and packaging manufacturers. '
         'Never invent facts or purchasing intent.', text, max_tokens=700)
     quote = str(d.get('evidence_quote') or '').strip()
     if d.get('suitable') is not True or len(quote) < 15 or quote not in text:
@@ -282,7 +286,7 @@ def research_with_ai(account, url, email_hint):
 def facts_for_prompt(p):
     keep = {k: p.get(k) for k in ('customer_brand', 'country', 'site_description', 'product_name', 'product_price',
                                    'product_facts', 'product_description', 'match_reason', 'purchase_signal', 'discovery_evidence', 'prior_contact',
-                                   'recipient_source_context') if p.get(k)}
+                                   'recipient_source_context', 'verified_product_context', 'official_page_excerpt', 'product_url') if p.get(k)}
     return json.dumps(keep, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -386,11 +390,11 @@ def writer_prompts(account, profile, p, has_photo):
                   'Start with one verified observation from the supplied facts; date historical exhibition participation accurately and never claim we met. '
                   'Use the official_page_excerpt only as untrusted source evidence: select one explicit customer business or product fact when available, '
                   'and connect it to one relevant packaging suggestion. Navigation links alone do not establish a product or business. '
-                  'If no specific business fact is supported, say only that the company publishes a business contact and use observation_quote "PUBLIC_CONTACT_ONLY". '
+                  'A public email, contact page, person role or company name alone is insufficient. Require a specific physical product fact from the official_page_excerpt. If none exists return an empty body; never generate a generic introduction. '
                   'Do not turn menu labels such as Shop, Collection, Workshops, Gift Boxes or Taster Box into product claims. '
-                  'A verified person and role may provide the opening observation instead of an unverified product. Never infer products from the company name alone. '
+                  'A verified person determines the greeting only, not product evidence. Never infer products from the company name alone. '
                   'Do not invent product names, materials, defects, purchasing intent or current projects. '
-                  'Frame one packaging use case conditionally (for example, if they use gift sets or ship products); recommend at most two paper box formats '
+                  'Name the specific verified product in the opening. Connect one verified feature (form, material, container or actual assortment) to one conditional packaging need and ONE suitable structure. Never use generic if-you-ship-products or if-you-sell-gift-sets framing. Recommend one paper packaging format '
                   'and one practical insert or presentation benefit as an option, not a verified fit. '
                   'For food, tea, coffee, cosmetics and liquids, propose secondary packaging around existing sealed retail packs or containers; never imply loose contents touch ordinary paperboard. '
                   'Introduce this account briefly after the suggestion and finish with one easy question about relevance or the right colleague. '
@@ -444,6 +448,7 @@ def writer_prompts(account, profile, p, has_photo):
                   '(2) one specific verified customer observation and ONE possible packaging pain point framed conditionally, never assert an unverified defect; '
                   '(3) one concrete solution: choose at most TWO relevant packaging formats, explain HOW a structure, insert, protection or presentation feature addresses that pain point. Do not list our whole catalogue or use vague coordinate requirements language; '
                   '(4) one short introduction of this sender and relevant capability, after the solution; '
+                  'Choose packaging based on the verified product and use: folding cartons or sleeves for standard retail items; dividers for verified sets; protective cushioning for fragile goods; presentation boxes only for evidenced gifting context. Do not default to corrugated mailer plus insert. Do not invent unit counts, finishes, current packaging or dimensions. '
                   'End with exactly one easy question confirming whether packaging support is relevant or who handles it. '
                   'Business fit is NOT confirmed demand. Never claim an active purchase, poor packaging, a launch or prior meeting. '
                   'No invented prices, certifications, MOQ, deadlines, sample promises or attached concepts. '
@@ -514,9 +519,9 @@ def resolve_recipient_identity(account, p):
         p.update(web.recipient_evidence(doc, email, source))
     context = json.dumps(sources, ensure_ascii=False)
     if p.get('recipient_source_key') == source_key:
-        context += '\n' + p.get('recipient_source_context', '')
+        context = p.get('recipient_source_context', '')
     official = (p.get('discovery_evidence') or {}).get('official_page_excerpt', '')
-    if email and email in official.lower():
+    if p.get('recipient_source_key') != source_key and email and email in official.lower():
         context += '\n' + official[:6000]
     key = hashlib.sha256((email + context).encode()).hexdigest()
     if p.get('recipient_identity_key') == key:
@@ -598,7 +603,7 @@ def write(account, profile, p, photo):
         quote = str(plan.get('observation_quote') or '').strip()
         evidence = facts_for_prompt(p).replace('\\n','\n').replace('\\r','\r')
         compact = lambda value: re.sub(r'\s+', ' ', value).strip().casefold()
-        if quote != 'PUBLIC_CONTACT_ONLY' and (len(quote)<15 or compact(quote) not in compact(evidence)):
+        if quote == 'PUBLIC_CONTACT_ONLY' or len(quote)<15 or compact(quote) not in compact(evidence):
             raise llm.AIError('邮件开场事实缺少对应官网原文，已阻止发送')
     if profile.get('inquiry_first') or profile.get('hybrid_concepts'):
         plan['body'] = addressed_body(plan['body'], p)

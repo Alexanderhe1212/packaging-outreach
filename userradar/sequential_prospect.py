@@ -3,7 +3,7 @@
 No mail integration. Discovery is supplied by the AI's live website search.
 The lock covers crawling and saving; the ledger is durable and resumable.
 """
-import fcntl
+from pipeline_core import file_lock as fcntl
 import json
 import sys
 import time

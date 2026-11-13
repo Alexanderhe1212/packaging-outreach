@@ -1,5 +1,6 @@
 """Public website contact research. No mail, account access or outreach integration."""
 from business_fit import evidence, assess
+import os
 import functools
 import copy
 import ipaddress
@@ -19,7 +20,7 @@ from contact_extract import contact_cards, prepare_visible_contacts, named_role_
 from contact_quality import phone_info, whatsapp_links, qualify, country_hint
 
 ROOT = Path(__file__).resolve().parent
-PORT = 18830
+PORT = int(os.environ.get('USER_RADAR_PORT', '18830'))
 AGENT = 'DecisionFinder/0.1'
 EMAIL = re.compile(r'[A-Z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}', re.I)
 ROLE = re.compile(r'\b(C[.]?E[.]?O[.]?|C[.]?F[.]?O[.]?|chief financial officer|(?:international|commercial|corporate|business development|export|sales and marketing) director|founders?|co-founders?|owners?|president|managing director|(?:sales|marketing|export(?:s)?)\s*(?:[-–—]\s*)?director|director\s*(?:[-–—]\s*)?(?:of\s+)?(?:exports?|marketing|sales|operations|commercial|business development|sustainability)|procurement|purchasing|sourcing|supply chain|packaging|managing partner|general manager|head of (?:(?:legal|human rights|compliance|ethics|environment|social responsibility)\s*(?:,|&|and)\s*){0,3}(?:business|marketing|sales|exports?|procurement|purchasing|sourcing|operations|sustainability)|(?:sales|marketing|brand|exports?|business development|international sales)\s+manager|manager\s+(?:(?:dept\.?|department)\s+(?:of|pf)\s+)?(?:marketing|exports?|procurement|purchasing)|chief executive|chief growth officer|chief operating officer|chief commercial officer|vice president|operations director|säljchef|key account manager chef|einkauf|beschaffung|geschäftsführer|inhaber|achats|directeur|acquisti)\b|创始人|采购|总经理|董事长|^\s*(?:executive\s+)?director\s*$', re.I)
