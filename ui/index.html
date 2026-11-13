@@ -381,6 +381,7 @@ function renderAcc(){
    <label>IMAP 服务器 : 端口<div class="row" style="flex-wrap:nowrap"><input data-a="${i}" data-k="imap.host" value="${E((a.imap||{}).host||'')}"><input data-a="${i}" data-k="imap.port" value="${E((a.imap||{}).port||993)}" style="width:80px"></div></label>
    <label>邮箱密码 / 授权码<input type="password" data-pw="${a.id}" placeholder="${st.has_password[a.id]?(a.keychain_service?'使用钥匙串中的旧密码（留空不改）':'已保存（留空不改）'):'填写授权码'}" value="${E(S.pw[a.id]||'')}"></label>
    <label>产品方案<select data-a="${i}" data-k="profile">${Object.values(profs).map(p=>opt(p.id,p.name,a.profile||'packaging')).join('')}</select></label>
+   <label>邮件内容模式<select data-a="${i}" data-k="text_only">${opt('true','纯文字（不生成图片）',String(a.text_only===true))}${opt('false','效果图（必须通过检查）',String(a.text_only===true))}</select></label>
    <label>发送方式<select data-a="${i}" data-k="auto_send">${opt('true','自动发送',String(a.auto_send!==false))}${opt('false','人工审核后发送',String(a.auto_send!==false))}</select></label>
    <label>每日上限（封，0 = 不限）<input type="number" min="0" data-a="${i}" data-k="daily_limit" value="${a.daily_limit||0}"></label>
    <label>两封间隔（分钟，最少-最多）<div class="row" style="flex-wrap:nowrap"><input type="number" data-a="${i}" data-k="interval0" value="${(a.send_interval_minutes||[4,9])[0]}"><input type="number" data-a="${i}" data-k="interval1" value="${(a.send_interval_minutes||[4,9])[1]}"></div></label>
@@ -417,7 +418,7 @@ async function archiveNow(id,dry){collect();const a=S.settings.accounts.find(x=>
   try{const r=await api('/api/archive',{account:id,dry_run:dry,days:cfg.days||7,folders:cfg.folders||['sent','trash']});
    t.textContent=(dry?'可释放：':'已存档并清理：')+`${r.archived} 封，${GB(r.bytes)}\n`+r.folders.map(f=>`${f.name}：${f.messages} 封 ${GB(f.bytes)}`).join('\n')+(dry&&r.archived>=300?'\n（每次最多处理 300 封/文件夹，可多点几次）':'')}catch(e){t.textContent='✗ '+e.message}}
 function mailPreset(i,k){if(!k)return;collect();const m=S.settings.mail_presets[k],a=S.settings.accounts[i];a.smtp={...m.smtp};a.imap={...m.imap};renderSettings()}
-function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:0,send_interval_minutes:[4,9],auto_send:false,language:'en'});renderSettings()}
+function addAcc(){collect();S.settings.accounts.push({id:'acc'+(S.settings.accounts.length+1),name:'新账号',profile:'packaging',smtp:{host:'',port:465},imap:{host:'',port:993},daily_limit:0,send_interval_minutes:[4,9],auto_send:false,text_only:true,language:'en'});renderSettings()}
 function delAcc(i){if(!confirm('删除这个账号？已发送记录会保留。'))return;collect();S.settings.accounts.splice(i,1);renderSettings()}
 async function testMail(id){collect();const t=$('#m_'+id);t.textContent='保存并测试中…';try{await persist();const r=await api('/api/test-mail',{account:id});t.innerHTML=`<span style="color:var(--good)">✓ ${E(r.message)}</span>`}catch(e){t.innerHTML=`<span class="err">✗ ${E(e.message)}</span>`}}
 function uploadSig(id,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async()=>{try{collect();await persist();await api('/api/signature',{account:id,data:r.result});toast('签名图片已更新');openSettings('acc')}catch(e){toast(e.message)}};r.readAsDataURL(f)}
@@ -465,7 +466,7 @@ function collect(){
     if(k==='interval0'||k==='interval1'){a.send_interval_minutes=a.send_interval_minutes||[4,9];a.send_interval_minutes[+k.slice(-1)]=+v||0}
     else if(k==='hours0'||k==='hours1'){a._h=a._h||[...(a.send_hours_beijing||['',''])];a._h[+k.slice(-1)]=v}
     else if(k==='focus')a.focus=v.split('\n').map(s=>s.trim()).filter(Boolean);
-    else if(['auto_send','followup_enabled','mail_archive.enabled'].includes(k))setPath(a,k,v==='true');
+    else if(['auto_send','text_only','followup_enabled','mail_archive.enabled'].includes(k))setPath(a,k,v==='true');
     else if(k==='mail_archive.days')setPath(a,k,+v||7);
     else if(k==='mailbox_limit_gb')a[k]=+v||0;
     else if(['daily_limit','followup_days','smtp.port','imap.port'].includes(k))setPath(a,k,+v||0);

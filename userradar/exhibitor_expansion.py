@@ -1,9 +1,10 @@
+import os
 """Review-gated exhibitor expansion; never creates sendable contacts."""
 from pipeline_core import file_lock as fcntl
 import argparse, datetime, json, time, urllib.request, hashlib
 from pathlib import Path
 from urllib.parse import urlsplit
-HOME=Path.home()/"Library/Application Support/UserRadar/expansion"
+HOME=Path(os.environ.get("USER_RADAR_EXPANSION_HOME",str(Path.home()/"Library/Application Support/UserRadar/expansion")))
 CATEGORIES=["gift boxes and presentation boxes","paper shopping bags","food packaging","retail packaging supplies","protective paper packaging"]
 def domain(url):
     p=urlsplit(url)

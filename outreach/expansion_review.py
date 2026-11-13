@@ -1,10 +1,11 @@
+import os
 """Desktop review of the existing expansion worker state, under a shared lock."""
 from pipeline_core import file_lock as fcntl
 import hashlib,json,time
 from pathlib import Path
 from contextlib import contextmanager
 from . import store
-HOME=Path.home()/"Library/Application Support/UserRadar/expansion"
+HOME=Path(os.environ.get("USER_RADAR_EXPANSION_HOME",str(Path.home()/"Library/Application Support/UserRadar/expansion")))
 def revision(row):
  return hashlib.sha256(json.dumps(row.get("evidence",{}),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 @contextmanager
@@ -44,3 +45,13 @@ def review(data):
   save(s)
  store.audit("expansion_review","",origin=data.get("_origin"),result=data["decision"])
  return {"ok":True,"message":"Review saved; this action does not send email"}
+
+
+def configure(data):
+ if not isinstance(data.get("enabled"),bool):raise ValueError("Explicit enabled flag required")
+ with locked():
+  p=HOME/"config.json";cfg=json.loads(p.read_text()) if p.exists() else dict(daily_search_calls=6,max_pending_review=15)
+  cfg["enabled"]=data["enabled"]
+  tmp=p.with_suffix(".config.tmp");tmp.write_text(json.dumps(cfg,ensure_ascii=False,indent=2));tmp.replace(p)
+ store.audit("expansion_configured","",origin=data.get("_origin"),result="enabled" if cfg["enabled"] else "paused")
+ return {"ok":True}

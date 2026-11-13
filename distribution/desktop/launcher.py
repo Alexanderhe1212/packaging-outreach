@@ -7,12 +7,12 @@ def environment():
     else:base=pathlib.Path(os.environ.get('XDG_DATA_HOME',str(pathlib.Path.home()/'.local/share')))/'user-radar'
     base.mkdir(parents=True,exist_ok=True)
     env={k:v for k,v in os.environ.items() if not k.startswith(('OUTREACH_','USER_RADAR_'))}
-    env.update(OUTREACH_DATA=str(base/'outreach'),USER_RADAR_CUSTOMER_DB=str(base/'customers.sqlite3'),USER_RADAR_EXTENSION_CONFIG=str(base/'extension-pairing.json'),PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
+    env.update(OUTREACH_DATA=str(base/'outreach'),USER_RADAR_CUSTOMER_DB=str(base/'customers.sqlite3'),USER_RADAR_EXTENSION_CONFIG=str(base/'extension-pairing.json'),USER_RADAR_EXPANSION_HOME=str(base/'expansion'),PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
     return base,env
 
 def service(name):
     sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'userradar'))
-    target=ROOT/('app.py' if name=='outreach' else 'userradar/app.py')
+    target=ROOT/('app.py' if name=='outreach' else 'userradar/exhibitor_expansion.py' if name=='expansion' else 'userradar/app.py')
     sys.argv=[str(target),'--no-browser'] if name=='outreach' else [str(target)]
     runpy.run_path(str(target),run_name='__main__')
 
@@ -25,7 +25,7 @@ def main():
     ports=[18800,18830]
     if '--smoke-test' in sys.argv:
         base=pathlib.Path(tempfile.mkdtemp(prefix='userradar-smoke-'))
-        env.update(OUTREACH_DATA=str(base/'outreach'),USER_RADAR_CUSTOMER_DB=str(base/'customers.sqlite3'))
+        env.update(OUTREACH_DATA=str(base/'outreach'),USER_RADAR_CUSTOMER_DB=str(base/'customers.sqlite3'),USER_RADAR_EXPANSION_HOME=str(base/'expansion'))
         for i in range(2):
             with socket.socket() as sock:sock.bind(('127.0.0.1',0));ports[i]=sock.getsockname()[1]
         env.update(OUTREACH_PORT=str(ports[0]),USER_RADAR_PORT=str(ports[1]))
@@ -37,11 +37,14 @@ def main():
     store.db()
     for a in config.load()['accounts']:store.put('paused_'+a['id'],True)
     store.close()
+    expansion=pathlib.Path(env['USER_RADAR_EXPANSION_HOME']);expansion.mkdir(parents=True,exist_ok=True)
+    for filename,value in [('config.json',dict(enabled=False,daily_search_calls=6,max_pending_review=15)),('state.json',dict(rows=[],calls_today=0,status='paused'))]:
+        if not (expansion/filename).exists():(expansion/filename).write_text(json.dumps(value),encoding='utf-8')
     children=[]
     if '--serve-only' in sys.argv:
         signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(KeyboardInterrupt()))
     try:
-        for name in ('outreach','radar'):
+        for name in ('outreach','radar','expansion'):
             cmd=[sys.executable,'--service',name] if getattr(sys,'frozen',False) else [sys.executable,str(pathlib.Path(__file__).resolve()),'--service',name]
             with (base/(name+'.log')).open('ab') as log:children.append(subprocess.Popen(cmd,cwd=ROOT,env=env,stdout=log,stderr=log))
         for _ in range(150):

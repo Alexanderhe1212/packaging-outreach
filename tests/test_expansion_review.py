@@ -13,3 +13,9 @@ class Review(unittest.TestCase):
    data=dict(website=row['website'],decision='approved',revision=e.revision(row),grade='B',industry_verified=True,compliance_checked=True,exhibitor_source='https://event.test/one',note='Verified sources')
    self.assertTrue(e.review(data)['ok']);saved=e.load()['rows'][0];self.assertEqual(saved['review_revision'],e.revision(saved))
    data.update(decision='rejected',note='Needs more evidence');e.review(data);self.assertEqual(e.load()['rows'][0]['review'],'rejected')
+
+ def test_configure_is_explicit_and_does_not_start_sender(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(e,'HOME',pathlib.Path(t)),patch.object(e.store,'audit'):
+   with self.assertRaises(ValueError):e.configure({'enabled':'yes'})
+   e.configure({'enabled':True})
+   self.assertTrue(json.loads((pathlib.Path(t)/'config.json').read_text())['enabled'])
