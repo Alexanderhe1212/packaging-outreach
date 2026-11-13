@@ -8,3 +8,8 @@ Project-owned code retains the root MIT license. Vendored components retain thei
 - Windows builds bundle CPython under its included license and Python dependency wheels with their `.dist-info` license metadata. Runtime binary artifacts are build outputs, not credentials or customer data.
 
 Source for the redistributed subset is included in this repository. No external provider API keys or private datasets are included. Build dependency hashes are recorded per build; never treat a root project license as covering every dependency.
+
+
+## Optional bundled desktop runtime
+
+Native builds use PySide6 / Qt for Python and shiboken6. Their upstream licenses and notices remain applicable and are included through package data and distribution metadata. See https://doc.qt.io/qtforpython-6/licenses.html . PyInstaller uses its upstream license and bootloader exception. These dependencies are not relicensed under this project MIT license.
